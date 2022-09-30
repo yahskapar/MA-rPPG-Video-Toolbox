@@ -1,17 +1,15 @@
 import os
 from argparse import ArgumentParser
-from xmlrpc.client import boolean
 import mat73
 import numpy as np
 import imageio
 from tqdm import tqdm
-import cv2
 import hdf5storage
+from skimage import img_as_ubyte
 import warnings
+import cv2
 warnings.filterwarnings("ignore")
 
-from torchvideotransforms import video_transforms, volume_transforms
-from skimage import img_as_ubyte
 
 def read_video(video_file):
     """Reads a video file, returns frames(T,H,W,3) """
@@ -22,37 +20,33 @@ def read_video(video_file):
 def save_video(mat, file_name, new_xsub, save_path):
     """Reads a video file, returns frames(T,H,W,3) """
     mat['Xsub'] = new_xsub # save raw frames
-    filename =  file_name + '_random_crop.mat'
+    filename =  file_name + '_rotation.mat'
     hdf5storage.savemat(os.path.join(save_path, filename), mat, format='7.3')
     return
 
 
+def rotate_image(image, angle):
+  image_center = tuple(np.array(image.shape[1::-1]) / 2)
+  rot_mat = cv2.getRotationMatrix2D(image_center, angle, 1.0)
+  result = cv2.warpAffine(image, rot_mat, image.shape[1::-1], flags=cv2.INTER_LINEAR)
+  return result
+
 def main():
     parser = ArgumentParser()
     parser.add_argument("--video_path", default='scamps_videos_example', help="path to videos")
-    parser.add_argument("--save_path", default='result_random_crop', help="path to save videos")
-    parser.add_argument("--new_length", default=160, help="new length")
-    parser.add_argument("--new_width", default=160, help="new width")
-    parser.add_argument("--upscale", default=False, action='store_true', help="upscale the video") 
-    parser.add_argument("--center", default=False,action='store_true', help="crop to the center") 
+    parser.add_argument("--rotation_degree", default=10,type=int, help="rotation degree")
+    parser.add_argument("--save_path", default='result_rotation', help="path to save videos")
     opt = parser.parse_args()
     idx = 0
     if not os.path.exists(opt.save_path):
         os.mkdir(opt.save_path)
-    for video_path in tqdm(os.listdir(opt.video_path)[:1]):
+    for video_path in tqdm(os.listdir(opt.video_path)):
         mat, video = read_video(os.path.join(opt.video_path,video_path))
-        if opt.center:
-            video_transform_list = [video_transforms.CenterCrop((opt.new_length,opt.new_width))]
-        else:
-            video_transform_list = [video_transforms.RandomCrop((opt.new_length,opt.new_width))]
-        transforms = video_transforms.Compose(video_transform_list)
-        result = transforms(video)
+        result = []
+        for frame in video:
+            t = rotate_image(frame,opt.rotation_degree)
+            result.append(t)
 
-        if opt.upscale:
-            t = []
-            for frame in result:
-                t.append(cv2.resize(frame,(240,240),interpolation = cv2.INTER_LINEAR))
-            result = t
         save_video(mat,video_path.split('.')[0],result,opt.save_path)
         #result_file = opt.save_path+"/result_"+str(idx)+".mp4"  
         #imageio.mimsave(result_file, [img_as_ubyte(f) for f in result], fps = 30)
