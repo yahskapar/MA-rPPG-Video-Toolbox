@@ -28,7 +28,7 @@ def save_video(mat, file_name, new_xsub, save_path):
 def rotate_image(image, angle):
   image_center = tuple(np.array(image.shape[1::-1]) / 2)
   rot_mat = cv2.getRotationMatrix2D(image_center, angle, 1.0)
-  result = cv2.warpAffine(image, rot_mat, image.shape[1::-1], flags=cv2.INTER_LINEAR)
+  result = cv2.warpAffine(image, rot_mat, image.shape[1::-1], flags=cv2.INTER_NEAREST)
   return result
 
 def main():
@@ -47,9 +47,9 @@ def main():
             t = rotate_image(frame,opt.rotation_degree)
             result.append(t)
 
-        save_video(mat,video_path.split('.')[0],result,opt.save_path)
-        #result_file = opt.save_path+"/result_"+str(idx)+".mp4"  
-        #imageio.mimsave(result_file, [img_as_ubyte(f) for f in result], fps = 30)
+        #save_video(mat,video_path.split('.')[0],result,opt.save_path)
+        result_file = opt.save_path+"/result_"+str(idx)+".mp4"  
+        imageio.mimsave(result_file, [img_as_ubyte(f) for f in result], fps = 30)
         idx+=1
 
 if __name__ == '__main__':

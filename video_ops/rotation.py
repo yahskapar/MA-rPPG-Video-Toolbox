@@ -6,7 +6,7 @@ import imageio
 from tqdm import tqdm
 from skimage import img_as_ubyte
 import hdf5storage
-from torchvideotransforms import video_transforms
+import skimage.transform
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -32,20 +32,19 @@ def main():
     opt = parser.parse_args()
     idx = 0
 
-    video_transform_list = [video_transforms.RandomRotation(opt.rotation_degree)]
-    transforms = video_transforms.Compose(video_transform_list)
-
+    mode = "reflect"
     if not os.path.exists(opt.save_path):
         os.mkdir(opt.save_path)
     for video_path in tqdm(os.listdir(opt.video_path)):
         mat, video = read_video(os.path.join(opt.video_path,video_path))
-        result = transforms(video)
-
-        #result_file = os.path.join(opt.save_path,"result_"+str(idx)+".mp4")        
-        #imageio.mimsave(result_file, [img_as_ubyte(f) for f in result], fps = 30)
+        result = []
+        for frame in video:
+            img = skimage.transform.rotate(frame, angle=opt.rotation_degree, mode=mode)
+            result.append(img)
+        result_file = os.path.join(opt.save_path,"result_"+str(idx)+".mp4")       
+        imageio.mimsave(result_file, [img_as_ubyte(f) for f in result], fps = 30)
         idx+=1
-
-        save_video(mat,video_path.split('.')[0],result,opt.save_path)
+        #save_video(mat,video_path.split('.')[0],result,opt.save_path)
 
 if __name__ == '__main__':
     main()

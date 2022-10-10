@@ -39,7 +39,7 @@ def main():
     idx = 0
     if not os.path.exists(opt.save_path):
         os.mkdir(opt.save_path)
-    for video_path in tqdm(os.listdir(opt.video_path)[:1]):
+    for video_path in tqdm(os.listdir(opt.video_path)):
         mat, video = read_video(os.path.join(opt.video_path,video_path))
         if opt.center:
             video_transform_list = [video_transforms.CenterCrop((opt.new_length,opt.new_width))]
@@ -60,4 +60,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+#python random_crop --upscale
     
