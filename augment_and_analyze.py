@@ -385,27 +385,19 @@ if __name__ == "__main__":
             predictions = predictions_backward[::-1] + predictions_forward[1:]
         else:
             predictions = make_animation(source_image, driving_video, frames, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
-            predictions_repeated = make_animation(source_image, driving_video, 0, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
-            final_preds_repeated.append(predictions_repeated)
             final_preds.append(predictions)
-
-    np_preds_repeated = np.squeeze(np.asarray(final_preds_repeated))
-    np.save('one_shot_output_repeated.npy', np_preds_repeated)
 
     np_preds = np.squeeze(np.asarray(final_preds))
     np.save('one_shot_output.npy', np_preds)
 
     final_preds = [resize(frame, (240, 240))[..., :3] for frame in np_preds]
-    final_preds_repeated = [resize(frame, (240, 240))[..., :3] for frame in np_preds_repeated]
 
-    imageio.mimsave('result_preds_repeated.mp4', [img_as_ubyte(frame) for frame in final_preds_repeated], fps=fps)
     imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in final_preds], fps=fps)
     imageio.mimsave('source_video.mp4', [img_as_ubyte(frame) for frame in source_video], fps=fps)
 
     if opt.scamps_source != '':
 
         masked_image = np.asarray(final_preds)
-        masked_image_repeated = np.asarray(final_preds_repeated)
         source_masks = read_segmentation_mask(opt.scamps_source)
 
         mask_to_append = source_masks[598,:,:]
@@ -416,16 +408,10 @@ if __name__ == "__main__":
             for color_channel in range (np.shape(masked_image)[3]):
                 masked_image[frame_num, :, :, color_channel] = masked_image[frame_num, :, :, color_channel] * masks_for_source[frame_num, :, :]
 
-        for frame_num in range(np.shape(final_preds_repeated)[0]):
-            for color_channel in range (np.shape(masked_image)[3]):
-                masked_image_repeated[frame_num, :, :, color_channel] = masked_image_repeated[frame_num, :, :, color_channel] * masks_for_source[frame_num, :, :]
-
         final_preds = masked_image
-        final_preds_repeated = masked_image_repeated
 
     ppg_input = estimate_ppg(np.asarray(source_video))
     ppg_driving = estimate_ppg(np.asarray(driving_video))
-    ppg_repeated_output = estimate_ppg(np.asarray(final_preds_repeated))
     ppg_output = estimate_ppg(np.asarray(final_preds))
 
     # Plot PSD
@@ -441,14 +427,6 @@ if __name__ == "__main__":
     N = 30 * fs
     ppg_driving_fft = ppg_driving[:,1]
     ppg_driving_f, ppg_driving_pxx = scipy.signal.periodogram(ppg_driving_fft, fs=fs, nfft=1024, detrend=False)
-    
-
-    # Plot PSD
-
-    fs = 30
-    N = 30 * fs
-    ppg_repeated_output_fft = ppg_repeated_output[:,1]
-    ppg_repeated_output_f, ppg_repeated_output_pxx = scipy.signal.periodogram(ppg_repeated_output_fft, fs=fs, nfft=1024, detrend=False)
 
     # Plot PSD
 
@@ -457,18 +435,33 @@ if __name__ == "__main__":
     ppg_output_fft = ppg_output[:,1]
     ppg_output_f, ppg_output_pxx = scipy.signal.periodogram(ppg_output_fft, fs=fs, nfft=1024, detrend=False)
 
-    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, sharex=True, sharey=True)
+    fig1, (ax1, ax2, ax3) = plt.subplots(3, sharex=True, sharey=True)
     ax1.set_title('Raw Output from SCAMPS Data')
-    ax1.plot(ppg_input_f, ppg_input_pxx/ppg_input_pxx.max(), color='red')
+    ax1.plot(ppg_input[:,1]/ppg_input[:,1].max(), color='red')
     ax2.set_title('MP4 Output from Driving Video')
-    ax2.plot(ppg_driving_f, ppg_driving_pxx/ppg_driving_pxx.max(), color='black')
-    ax3.set_title('S: approx. 600 SCAMPS frames, D: approx. 600 Repeated Driving Frames')
-    ax3.plot(ppg_repeated_output_f, ppg_repeated_output_pxx/ppg_repeated_output_pxx.max(), color='green')
-    ax4.set_title('S: approx. 600 SCAMPS frames, D: approx. 600 Driving Frames')
-    ax4.plot(ppg_output_f, ppg_output_pxx/ppg_output_pxx.max(), color='magenta')
-    fig.text(0.5, 0.01, 'frequency [Hz]', ha='center')
-    fig.text(0.01, 0.5, 'Norm. PSD - Linear', va='center', rotation='vertical')
-    fig.suptitle('NVIDIA One-shot Talking-Head Synthesis with Minor Driving Video Motion')
-    fig.tight_layout()
-    plt.savefig('PSD_plots.png')
+    ax2.plot(ppg_driving[:,1]/ppg_driving[:,1].max(), color='black')
+    ax3.set_title('S: approx. 600 SCAMPS frames, D: approx. 600 Driving Frames')
+    ax3.plot(ppg_output[:,1]/ppg_output[:,1].max(), color='magenta')
+    fig1.text(0.5, 0.01, 'Frame #', ha='center')
+    fig1.text(0.01, 0.5, 'Signal', va='center', rotation='vertical')
+    fig1.suptitle('NVIDIA One-shot Talking-Head Synthesis with Driving Video Motion')
+    fig1.tight_layout()
+    plt.savefig('Waveform_plots.svg')
+
+    fig2, (ax4, ax5, ax6) = plt.subplots(3, sharex=True, sharey=True)
+    ax4.set_title('Raw Output from SCAMPS Data')
+    ax4.set_xlim([0, 5])
+    ax4.plot(ppg_input_f, ppg_input_pxx/ppg_input_pxx.max(), color='red')
+    ax5.set_title('MP4 Output from Driving Video')
+    ax5.set_xlim([0, 5])
+    ax5.plot(ppg_driving_f, ppg_driving_pxx/ppg_driving_pxx.max(), color='black')
+    ax6.set_title('S: approx. 600 SCAMPS frames, D: approx. 600 Driving Frames')
+    ax6.set_xlim([0, 5])
+    ax6.plot(ppg_output_f, ppg_output_pxx/ppg_output_pxx.max(), color='magenta')
+    fig2.text(0.5, 0.01, 'frequency [Hz]', ha='center')
+    fig2.text(0.01, 0.5, 'Norm. PSD - Linear', va='center', rotation='vertical')
+    fig2.suptitle('NVIDIA One-shot Talking-Head Synthesis with Driving Video Motion')
+    fig2.tight_layout()
+    plt.savefig('PSD_plots.svg')
+
     plt.show()

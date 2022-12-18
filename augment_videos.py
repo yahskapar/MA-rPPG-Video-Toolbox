@@ -25,6 +25,13 @@ from scipy.sparse import spdiags
 from scipy.signal import butter
 import hdf5storage
 
+import warnings
+warnings.filterwarnings("ignore")
+import numpy as np
+import cv2
+
+from torch.multiprocessing import Pool, Process, Value, Array, Manager, set_start_method
+
 
 if sys.version_info[0] < 3:
     raise Exception("You must use Python 3 or higher. Recommended version is Python 3.7")
@@ -84,37 +91,6 @@ def headpose_pred_to_degree(pred):
 
     return degree
 
-'''
-# beta version
-def get_rotation_matrix(yaw, pitch, roll):
-    yaw = yaw / 180 * 3.14
-    pitch = pitch / 180 * 3.14
-    roll = roll / 180 * 3.14
-
-    roll = roll.unsqueeze(1)
-    pitch = pitch.unsqueeze(1)
-    yaw = yaw.unsqueeze(1)
-
-    roll_mat = torch.cat([torch.ones_like(roll), torch.zeros_like(roll), torch.zeros_like(roll), 
-                          torch.zeros_like(roll), torch.cos(roll), -torch.sin(roll),
-                          torch.zeros_like(roll), torch.sin(roll), torch.cos(roll)], dim=1)
-    roll_mat = roll_mat.view(roll_mat.shape[0], 3, 3)
-
-    pitch_mat = torch.cat([torch.cos(pitch), torch.zeros_like(pitch), torch.sin(pitch), 
-                           torch.zeros_like(pitch), torch.ones_like(pitch), torch.zeros_like(pitch),
-                           -torch.sin(pitch), torch.zeros_like(pitch), torch.cos(pitch)], dim=1)
-    pitch_mat = pitch_mat.view(pitch_mat.shape[0], 3, 3)
-
-    yaw_mat = torch.cat([torch.cos(yaw), -torch.sin(yaw), torch.zeros_like(yaw),  
-                         torch.sin(yaw), torch.cos(yaw), torch.zeros_like(yaw),
-                         torch.zeros_like(yaw), torch.zeros_like(yaw), torch.ones_like(yaw)], dim=1)
-    yaw_mat = yaw_mat.view(yaw_mat.shape[0], 3, 3)
-
-    rot_mat = torch.einsum('bij,bjk,bkm->bim', roll_mat, pitch_mat, yaw_mat)
-
-    return rot_mat
-
-'''
 def get_rotation_matrix(yaw, pitch, roll):
     yaw = yaw / 180 * 3.14
     pitch = pitch / 180 * 3.14
@@ -244,8 +220,21 @@ def find_best_frame(source, driving, cpu=False):
             frame_num = i
     return frame_num
 
+def read_ubfc_video(video_file):
+        """Reads a video file, returns frames(T,H,W,3) """
+        VidObj = cv2.VideoCapture(video_file)
+        VidObj.set(cv2.CAP_PROP_POS_MSEC, 0)
+        success, frame = VidObj.read()
+        frames = list()
+        while success:
+            frame = cv2.cvtColor(np.array(frame), cv2.COLOR_BGR2RGB)
+            frame = np.asarray(frame)
+            frames.append(frame)
+            success, frame = VidObj.read()
+        return np.asarray(frames)
+
 # Read_video to convert video file to numpy array
-def read_video(video_file):
+def read_scamps_video(video_file):
     """Reads a video file, returns frames(T,H,W,3) """
     mat = mat73.loadmat(video_file)
     frames = mat['Xsub']  # load raw frames
@@ -256,7 +245,6 @@ def save_video(video_file_path, video_file, driving_video_file, new_xsub, save_p
     """Reads a video file, returns frames(T,H,W,3) """
     mat = mat73.loadmat(os.path.join(video_file_path, video_file))
     mat['Xsub'] = new_xsub # save raw frames
-    # scipy.io.savemat(os.path.join(save_path, video_file),mat)
     source_video_name = os.path.splitext(video_file)[0]
     driving_video_name = os.path.splitext(driving_video_file)[0]
     filename = source_video_name + '_' + driving_video_name + '.mat'
@@ -308,6 +296,121 @@ def estimate_ppg(video):
 
     return ppg_signal
 
+
+def make_video(opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,source_directory, source_filename, driving_filename, augmented_path):
+    final_preds = []
+    
+    # for frames in tqdm(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))):
+    for frames in range(min(np.shape(source_video)[0], np.shape(driving_video)[0])):
+        source_image = resize(source_video[frames], (256, 256))[..., :3]
+        #print(f'estimate jacobian: {estimate_jacobian}')
+        if opt.find_best_frame or opt.best_frame is not None:
+            i = opt.best_frame if opt.best_frame is not None else find_best_frame(source_image, driving_video, cpu=opt.cpu)
+            print ("Best frame: " + str(i))
+            driving_forward = driving_video[i:]
+            driving_backward = driving_video[:(i+1)][::-1]
+            predictions_forward = make_animation(source_image, driving_forward, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
+            predictions_backward = make_animation(source_image, driving_backward, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
+            predictions = predictions_backward[::-1] + predictions_forward[1:]
+        else:
+            predictions = make_animation(source_image, driving_video, frames, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
+            final_preds.append(predictions)
+    
+    np_preds = np.squeeze(np.asarray(final_preds))
+
+    if source_filename.endswith(".mat"):
+        final_preds = [resize(frame, (240, 240))[..., :3] for frame in np_preds]
+        save_video(source_directory, source_filename, driving_filename, final_preds, augmented_path)
+    elif source_filename.endswith(".avi"):
+        final_preds = [resize(frame, (480, 640))[..., :3] for frame in np_preds]
+        source_video_name = os.path.splitext(source_filename)[0]
+        driving_video_name = os.path.splitext(driving_filename)[0]
+        filename = source_video_name + '_' + driving_video_name + '.npy'
+        np.save(os.path.join(augmented_path, filename), final_preds)
+    return
+
+def augment_motion(source_list, driving_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector, he_estimator, estimate_jacobian):
+
+    # Set GPU
+    gpu_num = running_num % 4
+    torch.cuda.set_device(gpu_num)
+
+    source_filename = os.fsdecode(source_list[i])
+
+    if source_filename.endswith(".mat"):
+        source_video = []
+        source_video = read_scamps_video(os.path.join(source_directory, source_filename))
+        source_video.tolist()
+        print("source: ",os.path.join(source_directory, source_filename))
+    elif source_filename.endswith(".avi"):
+        source_video = []
+        source_video = read_ubfc_video(os.path.join(source_directory, source_filename)) 
+        source_video.tolist() 
+
+    #Randomize the driving list sequence
+    driving_path = np.random.choice(driving_list, 1)[0]
+    
+    driving_filename = os.fsdecode(driving_path)    
+
+    source_video_name = os.path.splitext(source_filename)[0]
+    driving_video_name = os.path.splitext(driving_filename)[0]
+
+    if source_filename.endswith(".mat"):
+        filename = source_video_name + '_' + driving_video_name + '.mat'
+
+        while os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
+            driving_path = np.random.choice(driving_list, 1)[0]
+            driving_filename = os.fsdecode(driving_path)
+            driving_video_name = os.path.splitext(driving_filename)[0]
+            filename = source_video_name + '_' + driving_video_name + '.mat'
+    elif source_filename.endswith(".avi"):
+        filename = source_video_name + '_' + driving_video_name + '.npy'
+
+        while os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
+            driving_path = np.random.choice(driving_list, 1)[0]
+            driving_filename = os.fsdecode(driving_path)
+            driving_video_name = os.path.splitext(driving_filename)[0]
+            filename = source_video_name + '_' + driving_video_name + '.npy'
+
+    try:
+        reader = imageio.get_reader(os.path.join(driving_directory, driving_filename))
+    except ValueError:
+        print("Unable to get driving video!")
+    print("driving: ",os.path.join(driving_directory, driving_filename))
+    fps = reader.get_meta_data()['fps']
+    driving_video = []
+
+    try:
+        for im in reader:
+            driving_video.append(im)
+    except RuntimeError:
+        pass
+    reader.close()
+
+    driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
+    print("Driving shape: ",np.shape(driving_video))
+
+    if(np.shape(driving_video)[0] < np.shape(source_video)[0]):
+    #Make total frames used theh same
+        source_length = len(source_video)
+        driving_length = len(driving_video)
+        if source_length > driving_length:
+            to_add = source_length - driving_length
+            reversed_driving = driving_video[::-1]
+            while to_add>0:
+                if to_add < driving_length:
+                    driving_video = np.vstack([driving_video,reversed_driving[:to_add]])
+                    to_add = -1
+                else:
+                    driving_video = np.vstack([driving_video,reversed_driving])
+                    reversed_driving = reversed_driving[::-1]
+                    to_add -= driving_length
+            print("Finishing resizing")
+
+    name = source_filename + "_" + driving_filename 
+    make_video(opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,source_directory, source_filename, driving_filename, opt.augmented_path)
+    return
+
 if __name__ == "__main__":
 
     parser = ArgumentParser()
@@ -349,200 +452,124 @@ if __name__ == "__main__":
 
     opt = parser.parse_args()
 
+    try:
+        set_start_method('spawn')
+    except RuntimeError:
+        pass 
+
     source_directory = opt.source_path
     driving_directory = opt.driving_path
     
-    for file in os.listdir(source_directory):
-        source_filename = os.fsdecode(file)
 
-        source_video = []
-        source_video = read_video(os.path.join(source_directory, source_filename))
-        source_video.tolist()
-        if source_filename.endswith(".mat"):
-            for file in os.listdir(driving_directory):
-                driving_filename = os.fsdecode(file)
-                reader = imageio.get_reader(os.path.join(driving_directory, driving_filename))
-                fps = reader.get_meta_data()['fps']
-                driving_video = []
+    generator, kp_detector, he_estimator = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, gen=opt.gen, cpu=opt.cpu)
+                
+    with open(opt.config) as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+    estimate_jacobian = config['model_params']['common_params']['estimate_jacobian']
+       
+    #Put the result videos in a folder
+    if not os.path.exists('result_video'):
+        os.makedirs('result_video')
 
-                try:
-                    for im in reader:
-                        driving_video.append(im)
-                except RuntimeError:
-                    pass
-                reader.close()
+    #Listing driving video list
+    driving_list = os.listdir(driving_directory)
 
-                driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
-                print(np.shape(driving_video))
-                generator, kp_detector, he_estimator = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, gen=opt.gen, cpu=opt.cpu)
-                final_preds = []
-                final_preds_repeated = []
+    #Listing source video list
+    source_list = os.listdir(source_directory)
 
-                for frames in tqdm(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))):
-                    source_image = resize(source_video[frames], (256, 256))[..., :3]
-                    with open(opt.config) as f:
-                        config = yaml.load(f, Loader=yaml.FullLoader)
-                    estimate_jacobian = config['model_params']['common_params']['estimate_jacobian']
-                    print(f'estimate jacobian: {estimate_jacobian}')
+    file_num = len(source_list)
+    choose_range = choose_range = range(0, file_num)
+    pbar = tqdm(list(choose_range))
 
-                    if opt.find_best_frame or opt.best_frame is not None:
-                        i = opt.best_frame if opt.best_frame is not None else find_best_frame(source_image, driving_video, cpu=opt.cpu)
-                        print ("Best frame: " + str(i))
-                        driving_forward = driving_video[i:]
-                        driving_backward = driving_video[:(i+1)][::-1]
-                        predictions_forward = make_animation(source_image, driving_forward, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
-                        predictions_backward = make_animation(source_image, driving_backward, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
-                        predictions = predictions_backward[::-1] + predictions_forward[1:]
-                    else:
-                        predictions = make_animation(source_image, driving_video, frames, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
-                        final_preds.append(predictions)
+    # shared data resource
+    p_list = []
+    running_num = 0
 
-                np_preds = np.squeeze(np.asarray(final_preds))
+    for i in choose_range:
+        process_flag = True
+        while process_flag:  # ensure that every i creates a process
+            if running_num < 8:  # in case of too many processes
+                p = Process(target=augment_motion, \
+                            args=(source_list, driving_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian))
+                p.start()
+                p_list.append(p)
+                running_num += 1
+                process_flag = False
+            for p_ in p_list:
+                if not p_.is_alive():
+                    p_list.remove(p_)
+                    p_.join()
+                    running_num -= 1
+                    pbar.update(1)
+    # join all processes
+    for p_ in p_list:
+        p_.join()
+        pbar.update(1)
+    pbar.close()
 
-                final_preds = [resize(frame, (240, 240))[..., :3] for frame in np_preds]
+    # for file in os.listdir(source_directory):
+    #     source_filename = os.fsdecode(file)
 
-                save_video(source_directory, source_filename, driving_filename, final_preds, opt.augmented_path)
-                imageio.mimsave('a_test_result.mp4', [img_as_ubyte(frame) for frame in final_preds], fps=fps)
-        else:
-            break
-    # # if opt.source_image != '':
-    # #     source_reader = imageio.get_reader(opt.source_image)
+    #     if source_filename.endswith(".mat"):
+    #         source_video = []
+    #         source_video = read_scamps_video(os.path.join(source_directory, source_filename))
+    #         source_video.tolist()
+    #         print("source: ",os.path.join(source_directory, source_filename))
+    #     elif source_filename.endswith(".avi"):
+    #         source_video = []
+    #         source_video = read_ubfc_video(os.path.join(source_directory, source_filename)) 
+    #         source_video.tolist() 
 
-    # reader = imageio.get_reader(opt.driving_video)
-    # fps = reader.get_meta_data()['fps']
-    # source_video = []
-    # driving_video = []
+    #     #Randomize the driving list sequence
+    #     driving_path = np.random.choice(driving_list, 1)[0]
+        
+    #     driving_filename = os.fsdecode(driving_path)    
 
-    # # if opt.source_image != '':
-    # #     try:
-    # #         for im in source_reader:
-    # #             source_video.append(im)
-    # #     except RuntimeError:
-    # #         pass
-    # #     source_reader.close()
+    #     source_video_name = os.path.splitext(source_filename)[0]
+    #     driving_video_name = os.path.splitext(driving_filename)[0]
+    #     filename = source_video_name + '_' + driving_video_name + '.mat'
 
-    # if opt.scamps_source != '':
-    #     source_video = read_video(opt.scamps_source)
+    #     while os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
+    #         driving_path = np.random.choice(driving_list, 1)[0]
+    #         driving_filename = os.fsdecode(driving_path)
+    #         driving_video_name = os.path.splitext(driving_filename)[0]
+    #         filename = source_video_name + '_' + driving_video_name + '.mat'
 
-    # if opt.scamps_source != '':
-    #     source_video.tolist()
+    #     try:
+    #         reader = imageio.get_reader(os.path.join(driving_directory, driving_filename))
+    #     except ValueError:
+    #         continue
+    #     print("driving: ",os.path.join(driving_directory, driving_filename))
+    #     fps = reader.get_meta_data()['fps']
+    #     driving_video = []
 
-    # try:
-    #     for im in reader:
-    #         driving_video.append(im)
-    # except RuntimeError:
-    #     pass
-    # reader.close()
+    #     try:
+    #         for im in reader:
+    #             driving_video.append(im)
+    #     except RuntimeError:
+    #         pass
+    #     reader.close()
 
-    # driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
-    # print(np.shape(driving_video))
-    # generator, kp_detector, he_estimator = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, gen=opt.gen, cpu=opt.cpu)
-    # final_preds = []
-    # final_preds_repeated = []
+    #     driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
+    #     print("Driving shape: ",np.shape(driving_video))
 
-    # for frames in tqdm(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))):
-    #     source_image = resize(source_video[frames], (256, 256))[..., :3]
-    #     with open(opt.config) as f:
-    #         config = yaml.load(f, Loader=yaml.FullLoader)
-    #     estimate_jacobian = config['model_params']['common_params']['estimate_jacobian']
-    #     print(f'estimate jacobian: {estimate_jacobian}')
+    #     if(np.shape(driving_video)[0] < np.shape(source_video)[0]):
+    #     #Making total frames same
+    #         source_length = len(source_video)
+    #         driving_length = len(driving_video)
+    #         if source_length > driving_length:
+    #             to_add = source_length - driving_length
+    #             reversed_driving = driving_video[::-1]
+    #             while to_add>0:
+    #                 if to_add < driving_length:
+    #                     driving_video = np.vstack([driving_video,reversed_driving[:to_add]])
+    #                     to_add = -1
+    #                 else:
+    #                     driving_video = np.vstack([driving_video,reversed_driving])
+    #                     reversed_driving = reversed_driving[::-1]
+    #                     to_add -= driving_length
+    #             print("Finishing resizing")
 
-    #     if opt.find_best_frame or opt.best_frame is not None:
-    #         i = opt.best_frame if opt.best_frame is not None else find_best_frame(source_image, driving_video, cpu=opt.cpu)
-    #         print ("Best frame: " + str(i))
-    #         driving_forward = driving_video[i:]
-    #         driving_backward = driving_video[:(i+1)][::-1]
-    #         predictions_forward = make_animation(source_image, driving_forward, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
-    #         predictions_backward = make_animation(source_image, driving_backward, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
-    #         predictions = predictions_backward[::-1] + predictions_forward[1:]
-    #     else:
-    #         predictions = make_animation(source_image, driving_video, frames, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
-    #         # predictions_repeated = make_animation(source_image, driving_video, 0, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
-    #         # final_preds_repeated.append(predictions_repeated)
-    #         final_preds.append(predictions)
-
-    # # np_preds_repeated = np.squeeze(np.asarray(final_preds_repeated))
-    # # np.save('one_shot_output_repeated.npy', np_preds_repeated)
-
-    # np_preds = np.squeeze(np.asarray(final_preds))
-    # np.save('one_shot_output.npy', np_preds)
-
-    # final_preds = [resize(frame, (240, 240))[..., :3] for frame in np_preds]
-    # # final_preds_repeated = [resize(frame, (240, 240))[..., :3] for frame in np_preds_repeated]
-
-    # # imageio.mimsave('result_preds_repeated.mp4', [img_as_ubyte(frame) for frame in final_preds_repeated], fps=fps)
-    # # imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in final_preds], fps=fps)
-    # # imageio.mimsave('source_video.mp4', [img_as_ubyte(frame) for frame in source_video], fps=fps)
-
-    # save_video(opt.scamps_source, final_preds, opt.augmented_path)
-
-    # # if opt.scamps_source != '':
-
-    # #     masked_image = np.asarray(final_preds)
-    # #     masked_image_repeated = np.asarray(final_preds_repeated)
-    # #     source_masks = read_segmentation_mask(opt.scamps_source)
-
-    # #     mask_to_append = source_masks[598,:,:]
-    # #     mask_to_append = mask_to_append[np.newaxis, :, :]
-    # #     masks_for_source = np.append(source_masks, mask_to_append, axis=0)
-
-    # #     for frame_num in range(np.shape(final_preds)[0]):
-    # #         for color_channel in range (np.shape(masked_image)[3]):
-    # #             masked_image[frame_num, :, :, color_channel] = masked_image[frame_num, :, :, color_channel] * masks_for_source[frame_num, :, :]
-
-    # #     for frame_num in range(np.shape(final_preds_repeated)[0]):
-    # #         for color_channel in range (np.shape(masked_image)[3]):
-    # #             masked_image_repeated[frame_num, :, :, color_channel] = masked_image_repeated[frame_num, :, :, color_channel] * masks_for_source[frame_num, :, :]
-
-    # #     final_preds = masked_image
-    # #     final_preds_repeated = masked_image_repeated
-
-    # # ppg_input = estimate_ppg(np.asarray(source_video))
-    # # ppg_driving = estimate_ppg(np.asarray(driving_video))
-    # # ppg_repeated_output = estimate_ppg(np.asarray(final_preds_repeated))
-    # # ppg_output = estimate_ppg(np.asarray(final_preds))
-
-    # # # Plot PSD
-
-    # # fs = 30
-    # # N = 30 * fs
-    # # ppg_input_fft = ppg_input[:,1]
-    # # ppg_input_f, ppg_input_pxx = scipy.signal.periodogram(ppg_input_fft, fs=fs, nfft=1024, detrend=False)
-    
-    # # # Plot PSD
-
-    # # fs = 30
-    # # N = 30 * fs
-    # # ppg_driving_fft = ppg_driving[:,1]
-    # # ppg_driving_f, ppg_driving_pxx = scipy.signal.periodogram(ppg_driving_fft, fs=fs, nfft=1024, detrend=False)
-    
-
-    # # # Plot PSD
-
-    # # fs = 30
-    # # N = 30 * fs
-    # # ppg_repeated_output_fft = ppg_repeated_output[:,1]
-    # # ppg_repeated_output_f, ppg_repeated_output_pxx = scipy.signal.periodogram(ppg_repeated_output_fft, fs=fs, nfft=1024, detrend=False)
-
-    # # # Plot PSD
-
-    # # fs = 30
-    # # N = 30 * fs
-    # # ppg_output_fft = ppg_output[:,1]
-    # # ppg_output_f, ppg_output_pxx = scipy.signal.periodogram(ppg_output_fft, fs=fs, nfft=1024, detrend=False)
-
-    # # fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, sharex=True, sharey=True)
-    # # ax1.set_title('Raw Output from SCAMPS Data')
-    # # ax1.plot(ppg_input_f, ppg_input_pxx/ppg_input_pxx.max(), color='red')
-    # # ax2.set_title('MP4 Output from Driving Video')
-    # # ax2.plot(ppg_driving_f, ppg_driving_pxx/ppg_driving_pxx.max(), color='black')
-    # # ax3.set_title('S: approx. 600 SCAMPS frames, D: approx. 600 Repeated Driving Frames')
-    # # ax3.plot(ppg_repeated_output_f, ppg_repeated_output_pxx/ppg_repeated_output_pxx.max(), color='green')
-    # # ax4.set_title('S: approx. 600 SCAMPS frames, D: approx. 600 Driving Frames')
-    # # ax4.plot(ppg_output_f, ppg_output_pxx/ppg_output_pxx.max(), color='magenta')
-    # # fig.text(0.5, 0.01, 'frequency [Hz]', ha='center')
-    # # fig.text(0.01, 0.5, 'Norm. PSD - Linear', va='center', rotation='vertical')
-    # # fig.suptitle('NVIDIA One-shot Talking-Head Synthesis with Minor Driving Video Motion')
-    # # fig.tight_layout()
-    # # plt.savefig('PSD_plots.png')
-    # # plt.show()
+    #     name = source_filename + "_" + driving_filename 
+    #     make_video(opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,source_directory, source_filename, driving_filename, opt.augmented_path)
+          
