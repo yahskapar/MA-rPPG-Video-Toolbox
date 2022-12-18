@@ -28,6 +28,9 @@ import hdf5storage
 import warnings
 warnings.filterwarnings("ignore")
 import numpy as np
+import cv2
+
+from torch.multiprocessing import Pool, Process, Value, Array, Manager, set_start_method
 
 
 if sys.version_info[0] < 3:
@@ -217,8 +220,21 @@ def find_best_frame(source, driving, cpu=False):
             frame_num = i
     return frame_num
 
+def read_ubfc_video(video_file):
+        """Reads a video file, returns frames(T,H,W,3) """
+        VidObj = cv2.VideoCapture(video_file)
+        VidObj.set(cv2.CAP_PROP_POS_MSEC, 0)
+        success, frame = VidObj.read()
+        frames = list()
+        while success:
+            frame = cv2.cvtColor(np.array(frame), cv2.COLOR_BGR2RGB)
+            frame = np.asarray(frame)
+            frames.append(frame)
+            success, frame = VidObj.read()
+        return np.asarray(frames)
+
 # Read_video to convert video file to numpy array
-def read_video(video_file):
+def read_scamps_video(video_file):
     """Reads a video file, returns frames(T,H,W,3) """
     mat = mat73.loadmat(video_file)
     frames = mat['Xsub']  # load raw frames
@@ -229,7 +245,6 @@ def save_video(video_file_path, video_file, driving_video_file, new_xsub, save_p
     """Reads a video file, returns frames(T,H,W,3) """
     mat = mat73.loadmat(os.path.join(video_file_path, video_file))
     mat['Xsub'] = new_xsub # save raw frames
-    # scipy.io.savemat(os.path.join(save_path, video_file),mat)
     source_video_name = os.path.splitext(video_file)[0]
     driving_video_name = os.path.splitext(driving_video_file)[0]
     filename = source_video_name + '_' + driving_video_name + '.mat'
@@ -282,10 +297,11 @@ def estimate_ppg(video):
     return ppg_signal
 
 
-def make_video(opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,idx, name):
+def make_video(opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,source_directory, source_filename, driving_filename, augmented_path):
     final_preds = []
     
-    for frames in tqdm(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))):
+    # for frames in tqdm(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))):
+    for frames in range(min(np.shape(source_video)[0], np.shape(driving_video)[0])):
         source_image = resize(source_video[frames], (256, 256))[..., :3]
         #print(f'estimate jacobian: {estimate_jacobian}')
         if opt.find_best_frame or opt.best_frame is not None:
@@ -301,10 +317,99 @@ def make_video(opt, source_video, driving_video,generator,kp_detector,he_estimat
             final_preds.append(predictions)
     
     np_preds = np.squeeze(np.asarray(final_preds))
-    final_preds = [resize(frame, (240, 240))[..., :3] for frame in np_preds]
-    tp = os.path.join('result_video',name)
-    imageio.mimsave(tp+'.mp4', [img_as_ubyte(frame) for frame in final_preds], fps=30)
 
+    if source_filename.endswith(".mat"):
+        final_preds = [resize(frame, (240, 240))[..., :3] for frame in np_preds]
+        save_video(source_directory, source_filename, driving_filename, final_preds, augmented_path)
+    elif source_filename.endswith(".avi"):
+        final_preds = [resize(frame, (480, 640))[..., :3] for frame in np_preds]
+        source_video_name = os.path.splitext(source_filename)[0]
+        driving_video_name = os.path.splitext(driving_filename)[0]
+        filename = source_video_name + '_' + driving_video_name + '.npy'
+        np.save(os.path.join(augmented_path, filename), final_preds)
+    return
+
+def augment_motion(source_list, driving_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector, he_estimator, estimate_jacobian):
+
+    # Set GPU
+    gpu_num = running_num % 4
+    torch.cuda.set_device(gpu_num)
+
+    source_filename = os.fsdecode(source_list[i])
+
+    if source_filename.endswith(".mat"):
+        source_video = []
+        source_video = read_scamps_video(os.path.join(source_directory, source_filename))
+        source_video.tolist()
+        print("source: ",os.path.join(source_directory, source_filename))
+    elif source_filename.endswith(".avi"):
+        source_video = []
+        source_video = read_ubfc_video(os.path.join(source_directory, source_filename)) 
+        source_video.tolist() 
+
+    #Randomize the driving list sequence
+    driving_path = np.random.choice(driving_list, 1)[0]
+    
+    driving_filename = os.fsdecode(driving_path)    
+
+    source_video_name = os.path.splitext(source_filename)[0]
+    driving_video_name = os.path.splitext(driving_filename)[0]
+
+    if source_filename.endswith(".mat"):
+        filename = source_video_name + '_' + driving_video_name + '.mat'
+
+        while os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
+            driving_path = np.random.choice(driving_list, 1)[0]
+            driving_filename = os.fsdecode(driving_path)
+            driving_video_name = os.path.splitext(driving_filename)[0]
+            filename = source_video_name + '_' + driving_video_name + '.mat'
+    elif source_filename.endswith(".avi"):
+        filename = source_video_name + '_' + driving_video_name + '.npy'
+
+        while os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
+            driving_path = np.random.choice(driving_list, 1)[0]
+            driving_filename = os.fsdecode(driving_path)
+            driving_video_name = os.path.splitext(driving_filename)[0]
+            filename = source_video_name + '_' + driving_video_name + '.npy'
+
+    try:
+        reader = imageio.get_reader(os.path.join(driving_directory, driving_filename))
+    except ValueError:
+        print("Unable to get driving video!")
+    print("driving: ",os.path.join(driving_directory, driving_filename))
+    fps = reader.get_meta_data()['fps']
+    driving_video = []
+
+    try:
+        for im in reader:
+            driving_video.append(im)
+    except RuntimeError:
+        pass
+    reader.close()
+
+    driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
+    print("Driving shape: ",np.shape(driving_video))
+
+    if(np.shape(driving_video)[0] < np.shape(source_video)[0]):
+    #Make total frames used theh same
+        source_length = len(source_video)
+        driving_length = len(driving_video)
+        if source_length > driving_length:
+            to_add = source_length - driving_length
+            reversed_driving = driving_video[::-1]
+            while to_add>0:
+                if to_add < driving_length:
+                    driving_video = np.vstack([driving_video,reversed_driving[:to_add]])
+                    to_add = -1
+                else:
+                    driving_video = np.vstack([driving_video,reversed_driving])
+                    reversed_driving = reversed_driving[::-1]
+                    to_add -= driving_length
+            print("Finishing resizing")
+
+    name = source_filename + "_" + driving_filename 
+    make_video(opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,source_directory, source_filename, driving_filename, opt.augmented_path)
+    return
 
 if __name__ == "__main__":
 
@@ -347,6 +452,11 @@ if __name__ == "__main__":
 
     opt = parser.parse_args()
 
+    try:
+        set_start_method('spawn')
+    except RuntimeError:
+        pass 
+
     source_directory = opt.source_path
     driving_directory = opt.driving_path
     
@@ -356,8 +466,7 @@ if __name__ == "__main__":
     with open(opt.config) as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
     estimate_jacobian = config['model_params']['common_params']['estimate_jacobian']
-    
-    idx = 0    
+       
     #Put the result videos in a folder
     if not os.path.exists('result_video'):
         os.makedirs('result_video')
@@ -365,40 +474,102 @@ if __name__ == "__main__":
     #Listing driving video list
     driving_list = os.listdir(driving_directory)
 
-    for file in os.listdir(source_directory):
-        source_filename = os.fsdecode(file)
+    #Listing source video list
+    source_list = os.listdir(source_directory)
 
-        if source_filename.endswith(".mat"):
-            source_video = []
-            source_video = read_video(os.path.join(source_directory, source_filename))
-            source_video.tolist()
-            print("source: ",os.path.join(source_directory, source_filename))
+    file_num = len(source_list)
+    choose_range = choose_range = range(0, file_num)
+    pbar = tqdm(list(choose_range))
 
-            #Randomize the driving list sequence
-            driving_path = np.random.choice(driving_list, 1)[0]
-            
-            driving_filename = os.fsdecode(driving_path)    
+    # shared data resource
+    p_list = []
+    running_num = 0
 
-            try:
-                reader = imageio.get_reader(os.path.join(driving_directory, driving_filename))
-            except ValueError:
-                continue
-            print("driving: ",os.path.join(driving_directory, driving_filename))
-            fps = reader.get_meta_data()['fps']
-            driving_video = []
+    for i in choose_range:
+        process_flag = True
+        while process_flag:  # ensure that every i creates a process
+            if running_num < 8:  # in case of too many processes
+                p = Process(target=augment_motion, \
+                            args=(source_list, driving_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian))
+                p.start()
+                p_list.append(p)
+                running_num += 1
+                process_flag = False
+            for p_ in p_list:
+                if not p_.is_alive():
+                    p_list.remove(p_)
+                    p_.join()
+                    running_num -= 1
+                    pbar.update(1)
+    # join all processes
+    for p_ in p_list:
+        p_.join()
+        pbar.update(1)
+    pbar.close()
 
-            try:
-                for im in reader:
-                    driving_video.append(im)
-            except RuntimeError:
-                pass
-            reader.close()
+    # for file in os.listdir(source_directory):
+    #     source_filename = os.fsdecode(file)
 
-            driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
-            print("Driving shape: ",np.shape(driving_video))
+    #     if source_filename.endswith(".mat"):
+    #         source_video = []
+    #         source_video = read_scamps_video(os.path.join(source_directory, source_filename))
+    #         source_video.tolist()
+    #         print("source: ",os.path.join(source_directory, source_filename))
+    #     elif source_filename.endswith(".avi"):
+    #         source_video = []
+    #         source_video = read_ubfc_video(os.path.join(source_directory, source_filename)) 
+    #         source_video.tolist() 
 
-            name = source_filename+ "_" + driving_filename 
-            make_video(opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,idx,name)
+    #     #Randomize the driving list sequence
+    #     driving_path = np.random.choice(driving_list, 1)[0]
+        
+    #     driving_filename = os.fsdecode(driving_path)    
 
-            idx+=1
+    #     source_video_name = os.path.splitext(source_filename)[0]
+    #     driving_video_name = os.path.splitext(driving_filename)[0]
+    #     filename = source_video_name + '_' + driving_video_name + '.mat'
+
+    #     while os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
+    #         driving_path = np.random.choice(driving_list, 1)[0]
+    #         driving_filename = os.fsdecode(driving_path)
+    #         driving_video_name = os.path.splitext(driving_filename)[0]
+    #         filename = source_video_name + '_' + driving_video_name + '.mat'
+
+    #     try:
+    #         reader = imageio.get_reader(os.path.join(driving_directory, driving_filename))
+    #     except ValueError:
+    #         continue
+    #     print("driving: ",os.path.join(driving_directory, driving_filename))
+    #     fps = reader.get_meta_data()['fps']
+    #     driving_video = []
+
+    #     try:
+    #         for im in reader:
+    #             driving_video.append(im)
+    #     except RuntimeError:
+    #         pass
+    #     reader.close()
+
+    #     driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
+    #     print("Driving shape: ",np.shape(driving_video))
+
+    #     if(np.shape(driving_video)[0] < np.shape(source_video)[0]):
+    #     #Making total frames same
+    #         source_length = len(source_video)
+    #         driving_length = len(driving_video)
+    #         if source_length > driving_length:
+    #             to_add = source_length - driving_length
+    #             reversed_driving = driving_video[::-1]
+    #             while to_add>0:
+    #                 if to_add < driving_length:
+    #                     driving_video = np.vstack([driving_video,reversed_driving[:to_add]])
+    #                     to_add = -1
+    #                 else:
+    #                     driving_video = np.vstack([driving_video,reversed_driving])
+    #                     reversed_driving = reversed_driving[::-1]
+    #                     to_add -= driving_length
+    #             print("Finishing resizing")
+
+    #     name = source_filename + "_" + driving_filename 
+    #     make_video(opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,source_directory, source_filename, driving_filename, opt.augmented_path)
           
