@@ -1,9 +1,12 @@
 import matplotlib
 matplotlib.use('Agg')
 import os, sys
+import time
+import shutil
 import yaml
 from argparse import ArgumentParser
 from tqdm import tqdm
+import gc
 
 import imageio
 import numpy as np
@@ -29,6 +32,7 @@ import warnings
 warnings.filterwarnings("ignore")
 import numpy as np
 import cv2
+from vidgear.gears import VideoGear
 
 from torch.multiprocessing import Pool, Process, Value, Array, Manager, set_start_method
 
@@ -36,6 +40,9 @@ from torch.multiprocessing import Pool, Process, Value, Array, Manager, set_star
 if sys.version_info[0] < 3:
     raise Exception("You must use Python 3 or higher. Recommended version is Python 3.7")
 
+# TODO: Might need to do this for every running process rather than just once
+# Does CUDA effectively deal with calling the generator, detector, and estimator
+# on tensors on different devices??
 def load_checkpoints(config_path, checkpoint_path, gen, cpu=False):
 
     with open(config_path) as f:
@@ -119,7 +126,7 @@ def get_rotation_matrix(yaw, pitch, roll):
 
     return rot_mat
 
-def keypoint_transformation(kp_canonical, he, estimate_jacobian=True, free_view=False, yaw=0, pitch=0, roll=0):
+def keypoint_transformation(gpu, kp_canonical, he, estimate_jacobian=True, free_view=False, yaw=0, pitch=0, roll=0):
     kp = kp_canonical['value']
     if not free_view:
         yaw, pitch, roll = he['yaw'], he['pitch'], he['roll']
@@ -128,17 +135,17 @@ def keypoint_transformation(kp_canonical, he, estimate_jacobian=True, free_view=
         roll = headpose_pred_to_degree(roll)
     else:
         if yaw is not None:
-            yaw = torch.tensor([yaw]).cuda()
+            yaw = torch.tensor([yaw]).cuda(gpu)
         else:
             yaw = he['yaw']
             yaw = headpose_pred_to_degree(yaw)
         if pitch is not None:
-            pitch = torch.tensor([pitch]).cuda()
+            pitch = torch.tensor([pitch]).cuda(gpu)
         else:
             pitch = he['pitch']
             pitch = headpose_pred_to_degree(pitch)
         if roll is not None:
-            roll = torch.tensor([roll]).cuda()
+            roll = torch.tensor([roll]).cuda(gpu)
         else:
             roll = he['roll']
             roll = headpose_pred_to_degree(roll)
@@ -166,72 +173,97 @@ def keypoint_transformation(kp_canonical, he, estimate_jacobian=True, free_view=
 
     return {'value': kp_transformed, 'jacobian': jacobian_transformed}
 
-def make_animation(source_image, driving_video, frame_num, generator, kp_detector, he_estimator, relative=True, adapt_movement_scale=True, estimate_jacobian=True, cpu=False, free_view=False, yaw=0, pitch=0, roll=0):
+def make_animation(gpu, source_image, driving_video, frame_num, generator, kp_detector, he_estimator, relative=True, adapt_movement_scale=True, estimate_jacobian=True, cpu=False, free_view=False, yaw=0, pitch=0, roll=0):
     with torch.no_grad():
         predictions = []
         source = torch.tensor(source_image[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2)
         if not cpu:
-            source = source.cuda()
+            source = source.cuda(gpu)
         driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3)
+        if not cpu:
+            driving = driving.cuda(gpu)
         kp_canonical = kp_detector(source)
         he_source = he_estimator(source)
         he_driving_initial = he_estimator(driving[:, :, 0])
 
-        kp_source = keypoint_transformation(kp_canonical, he_source, estimate_jacobian)
-        kp_driving_initial = keypoint_transformation(kp_canonical, he_driving_initial, estimate_jacobian)
+        kp_source = keypoint_transformation(gpu, kp_canonical, he_source, estimate_jacobian)
+        kp_driving_initial = keypoint_transformation(gpu, kp_canonical, he_driving_initial, estimate_jacobian)
         # kp_driving_initial = keypoint_transformation(kp_canonical, he_driving_initial, free_view=free_view, yaw=yaw, pitch=pitch, roll=roll)
 
         # for frame_idx in tqdm(range(driving.shape[2])):
         driving_frame = driving[:, :, frame_num]
         if not cpu:
-            driving_frame = driving_frame.cuda()
+            driving_frame = driving_frame.cuda(gpu)
         he_driving = he_estimator(driving_frame)
-        kp_driving = keypoint_transformation(kp_canonical, he_driving, estimate_jacobian, free_view=free_view, yaw=yaw, pitch=pitch, roll=roll)
+        kp_driving = keypoint_transformation(gpu, kp_canonical, he_driving, estimate_jacobian, free_view=free_view, yaw=yaw, pitch=pitch, roll=roll)
         kp_norm = normalize_kp(kp_source=kp_source, kp_driving=kp_driving,
                                 kp_driving_initial=kp_driving_initial, use_relative_movement=relative,
                                 use_relative_jacobian=estimate_jacobian, adapt_movement_scale=adapt_movement_scale)
         out = generator(source, kp_source=kp_source, kp_driving=kp_norm)
 
         predictions.append(np.transpose(out['prediction'].data.cpu().numpy(), [0, 2, 3, 1])[0])
+
+        # Try to clean-up here to reduce GPU memory footprint with MP
+        del source
+        del driving
+        del driving_frame
+        gc.collect()
+        torch.cuda.empty_cache()
     return predictions
 
-def find_best_frame(source, driving, cpu=False):
-    import face_alignment
+# def find_best_frame(source, driving, cpu=False):
+#     import face_alignment
 
-    def normalize_kp(kp):
-        kp = kp - kp.mean(axis=0, keepdims=True)
-        area = ConvexHull(kp[:, :2]).volume
-        area = np.sqrt(area)
-        kp[:, :2] = kp[:, :2] / area
-        return kp
+#     def normalize_kp(kp):
+#         kp = kp - kp.mean(axis=0, keepdims=True)
+#         area = ConvexHull(kp[:, :2]).volume
+#         area = np.sqrt(area)
+#         kp[:, :2] = kp[:, :2] / area
+#         return kp
 
-    fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, flip_input=True,
-                                      device='cpu' if cpu else 'cuda')
-    kp_source = fa.get_landmarks(255 * source)[0]
-    kp_source = normalize_kp(kp_source)
-    norm  = float('inf')
-    frame_num = 0
-    for i, image in tqdm(enumerate(driving)):
-        kp_driving = fa.get_landmarks(255 * image)[0]
-        kp_driving = normalize_kp(kp_driving)
-        new_norm = (np.abs(kp_source - kp_driving) ** 2).sum()
-        if new_norm < norm:
-            norm = new_norm
-            frame_num = i
-    return frame_num
+#     # TODO: Change this if I end up making the best frame method work, probably not needed
+#     fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, flip_input=True,
+#                                       device='cpu' if cpu else 'cuda')
+#     kp_source = fa.get_landmarks(255 * source)[0]
+#     kp_source = normalize_kp(kp_source)
+#     norm  = float('inf')
+#     frame_num = 0
+#     for i, image in tqdm(enumerate(driving)):
+#         kp_driving = fa.get_landmarks(255 * image)[0]
+#         kp_driving = normalize_kp(kp_driving)
+#         new_norm = (np.abs(kp_source - kp_driving) ** 2).sum()
+#         if new_norm < norm:
+#             norm = new_norm
+#             frame_num = i
+#     return frame_num
+
+# def read_ubfc_video(video_file):
+#         """Reads a video file, returns frames(T,H,W,3) """
+#         VidObj = cv2.VideoCapture(video_file)
+#         VidObj.set(cv2.CAP_PROP_POS_MSEC, 0)
+#         success, frame = VidObj.read()
+#         frames = list()
+#         while success:
+#             frame = cv2.cvtColor(np.array(frame), cv2.COLOR_BGR2RGB)
+#             frame = np.asarray(frame)
+#             frames.append(frame)
+#             success, frame = VidObj.read()
+#         print(np.shape(frames))
+#         return np.asarray(frames)
 
 def read_ubfc_video(video_file):
-        """Reads a video file, returns frames(T,H,W,3) """
-        VidObj = cv2.VideoCapture(video_file)
-        VidObj.set(cv2.CAP_PROP_POS_MSEC, 0)
-        success, frame = VidObj.read()
-        frames = list()
-        while success:
-            frame = cv2.cvtColor(np.array(frame), cv2.COLOR_BGR2RGB)
-            frame = np.asarray(frame)
-            frames.append(frame)
-            success, frame = VidObj.read()
-        return np.asarray(frames)
+    """Reads a video file, returns frames(T,H,W,3) """
+    vid = VideoGear(source=video_file).start()
+    frames = []
+    while True:
+        frame = vid.read()
+        if frame is None:
+            break
+        frame = cv2.cvtColor(np.array(frame), cv2.COLOR_BGR2RGB)
+        frame = np.asarray(frame)
+        frames.append(frame)
+    vid.stop()
+    return np.asarray(frames)
 
 # Read_video to convert video file to numpy array
 def read_scamps_video(video_file):
@@ -251,54 +283,12 @@ def save_video(video_file_path, video_file, driving_video_file, new_xsub, save_p
     hdf5storage.savemat(os.path.join(save_path, filename), mat, format='7.3')
     return
 
-def read_segmentation_mask(video_file):
-    """Reads a video file, returns frames(T,H,W,3) """
-    mat = mat73.loadmat(video_file)
-    frames = mat['skin_mask']  # load raw frames
-    print(frames.shape)
-    return np.asarray(frames)
-
-# detrend to be applied to signals in order to extract cyclical components
-def detrend(signal, Lambda):
-    """detrend(signal, Lambda) -> filtered_signal
-    This function applies a detrending filter.
-    This code is based on the following article "An advanced detrending method with application
-    to HRV analysis". Tarvainen et al., IEEE Trans on Biomedical Engineering, 2002.
-    *Parameters*
-      ``signal`` (1d numpy array):
-        The signal where you want to remove the trend.
-      ``Lambda`` (int):
-        The smoothing parameter.
-    *Returns*
-      ``filtered_signal`` (1d numpy array):
-        The detrended signal.
-    """
-    signal_length = signal.shape[0]
-
-    # observation matrix
-    H = np.identity(signal_length)
-
-    # second-order difference matrix
-    ones = np.ones(signal_length)
-    minus_twos = -2 * np.ones(signal_length)
-    diags_data = np.array([ones, minus_twos, ones])
-    diags_index = np.array([0, 1, 2])
-    D = spdiags(diags_data, diags_index, (signal_length - 2), signal_length).toarray()
-    filtered_signal = np.dot((H - np.linalg.inv(H + (Lambda ** 2) * np.dot(D.T, D))), signal)
-    return filtered_signal
-
-def estimate_ppg(video):
-    """Reads a video in numpy representation, returns estimated PPG signal"""
-    ppg_signal = video * 255                        # Scale by 255
-    ppg_signal = np.mean(ppg_signal, axis=(1,2))    # Spatial averaging
-
-    ppg_signal = detrend(ppg_signal, 100)           # Filter signal to get cyclical components
-
-    return ppg_signal
-
-
-def make_video(opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,source_directory, source_filename, driving_filename, augmented_path):
+def make_video(dataset, gpu, opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,source_directory, source_filename, driving_filename, augmented_path):
     final_preds = []
+    # Set GPU
+    torch.cuda.set_device(gpu)
+
+    # frames_pbar = tqdm(list(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))))
     
     # for frames in tqdm(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))):
     for frames in range(min(np.shape(source_video)[0], np.shape(driving_video)[0])):
@@ -309,32 +299,60 @@ def make_video(opt, source_video, driving_video,generator,kp_detector,he_estimat
             print ("Best frame: " + str(i))
             driving_forward = driving_video[i:]
             driving_backward = driving_video[:(i+1)][::-1]
-            predictions_forward = make_animation(source_image, driving_forward, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
-            predictions_backward = make_animation(source_image, driving_backward, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
+            predictions_forward = make_animation(gpu, source_image, driving_forward, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
+            predictions_backward = make_animation(gpu, source_image, driving_backward, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
             predictions = predictions_backward[::-1] + predictions_forward[1:]
         else:
-            predictions = make_animation(source_image, driving_video, frames, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
+            predictions = make_animation(gpu, source_image, driving_video, frames, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
             final_preds.append(predictions)
-    
+            # frames_pbar.update(1)
+    # frames_pbar.close()
     np_preds = np.squeeze(np.asarray(final_preds))
 
     if source_filename.endswith(".mat"):
         final_preds = [resize(frame, (240, 240))[..., :3] for frame in np_preds]
         save_video(source_directory, source_filename, driving_filename, final_preds, augmented_path)
-    elif source_filename.endswith(".avi"):
+    elif dataset == 'UBFC-rPPG':
         final_preds = [resize(frame, (480, 640))[..., :3] for frame in np_preds]
         source_video_name = os.path.splitext(source_filename)[0]
         driving_video_name = os.path.splitext(driving_filename)[0]
         filename = source_video_name + '_' + driving_video_name + '.npy'
-        np.save(os.path.join(augmented_path, filename), final_preds)
+        np.save(os.path.join(augmented_path, source_video_name, filename), final_preds)
     return
 
-def augment_motion(source_list, driving_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector, he_estimator, estimate_jacobian):
+# Resize back to original size
+def resize_to_original(frame, width, height):
+    return cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
 
-    # Set GPU
-    gpu_num = running_num % 4
-    torch.cuda.set_device(gpu_num)
+def face_detection(frame, use_larger_box=False, larger_box_coef=1.0):
+    """Face detection on a single frame.
 
+    Args:
+        frame(np.array): a single frame.
+        use_larger_box(bool): whether to use a larger bounding box on face detection.
+        larger_box_coef(float): Coef. of larger box.
+    Returns:
+        face_box_coor(List[int]): coordinates of face bouding box.
+    """
+    detector = cv2.CascadeClassifier('/playpen-nas-ssd/akshay/UNC_Google_Physio/MArPPG-Video-Toolbox/utils/haarcascade_frontalface_default.xml')
+    face_zone = detector.detectMultiScale(frame)
+    if len(face_zone) < 1:
+        print("ERROR: No Face Detected")
+        face_box_coor = [0, 0, frame.shape[0], frame.shape[1]]
+    elif len(face_zone) >= 2:
+        face_box_coor = np.argmax(face_zone, axis=0)
+        face_box_coor = face_zone[face_box_coor[2]]
+        print("Warning: More than one faces are detected(Only cropping the biggest one.)")
+    else:
+        face_box_coor = face_zone[0]
+    if use_larger_box:
+        face_box_coor[0] = max(0, face_box_coor[0] - (larger_box_coef - 1.0) / 2 * face_box_coor[2])
+        face_box_coor[1] = max(0, face_box_coor[1] - (larger_box_coef - 1.0) / 2 * face_box_coor[3])
+        face_box_coor[2] = larger_box_coef * face_box_coor[2]
+        face_box_coor[3] = larger_box_coef * face_box_coor[3]
+    return face_box_coor
+
+def augment_motion(dataset, gpu, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector, he_estimator, estimate_jacobian):
     source_filename = os.fsdecode(source_list[i])
 
     if source_filename.endswith(".mat"):
@@ -342,10 +360,35 @@ def augment_motion(source_list, driving_list, i, opt, running_num, source_direct
         source_video = read_scamps_video(os.path.join(source_directory, source_filename))
         source_video.tolist()
         print("source: ",os.path.join(source_directory, source_filename))
-    elif source_filename.endswith(".avi"):
+    elif dataset == 'UBFC-rPPG':
         source_video = []
-        source_video = read_ubfc_video(os.path.join(source_directory, source_filename)) 
-        source_video.tolist() 
+        print("source: ",os.path.join(source_directory, source_filename, f'{source_filename}_vid.avi'))
+        source_video = read_ubfc_video(os.path.join(source_directory, source_filename, f'{source_filename}_vid.avi')) 
+        source_video.tolist()
+
+    print(f'Source Shape: {np.shape(source_video)}')
+
+    # Face detection to crop
+    cropped_frames = []
+    face_region_all = []
+
+    # First, compute the median bounding box across all frames
+    for frame in source_video:
+        face_box = face_detection(frame, True, 2.0)
+        face_region_all.append(face_box)
+    face_region_all = np.asarray(face_region_all, dtype='int')
+    face_region_median = np.median(face_region_all, axis=0).astype('int')
+
+    # Apply the median bounding box for cropping and subsequent resizing
+    for frame in source_video:
+        cropped_frame = frame[int(face_region_median[1]):int(face_region_median[1]+face_region_median[3]),
+                              int(face_region_median[0]):int(face_region_median[0]+face_region_median[2])]
+        resized_frame = resize_to_original(cropped_frame, np.shape(source_video)[2], np.shape(source_video)[1])
+        cropped_frames.append(resized_frame)
+
+    source_video = cropped_frames
+
+    print(f'Cropped Source Shape: {np.shape(source_video)}')
 
     #Randomize the driving list sequence
     driving_path = np.random.choice(driving_list, 1)[0]
@@ -363,7 +406,7 @@ def augment_motion(source_list, driving_list, i, opt, running_num, source_direct
             driving_filename = os.fsdecode(driving_path)
             driving_video_name = os.path.splitext(driving_filename)[0]
             filename = source_video_name + '_' + driving_video_name + '.mat'
-    elif source_filename.endswith(".avi"):
+    elif dataset == 'UBFC-rPPG':
         filename = source_video_name + '_' + driving_video_name + '.npy'
 
         while os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
@@ -388,10 +431,10 @@ def augment_motion(source_list, driving_list, i, opt, running_num, source_direct
     reader.close()
 
     driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
-    print("Driving shape: ",np.shape(driving_video))
+    print("Driving shape: ", np.shape(driving_video))
 
     if(np.shape(driving_video)[0] < np.shape(source_video)[0]):
-    #Make total frames used theh same
+    #Make total frames used the same
         source_length = len(source_video)
         driving_length = len(driving_video)
         if source_length > driving_length:
@@ -408,8 +451,25 @@ def augment_motion(source_list, driving_list, i, opt, running_num, source_direct
             print("Finishing resizing")
 
     name = source_filename + "_" + driving_filename 
-    make_video(opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,source_directory, source_filename, driving_filename, opt.augmented_path)
+    make_video(dataset, gpu, opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,source_directory, source_filename, driving_filename, opt.augmented_path)
     return
+
+def copy_folder(src_folder, dst_folder):
+    if not os.path.exists(dst_folder):
+        os.makedirs(dst_folder)
+    for src_dir, dirs, files in os.walk(src_folder):
+        dst_dir = src_dir.replace(src_folder, dst_folder, 1)
+        if not os.path.exists(dst_dir):
+            os.makedirs(dst_dir)
+        for file_ in files:
+            if file_.endswith('.avi'):
+                continue
+            src_file = os.path.join(src_dir, file_)
+            dst_file = os.path.join(dst_dir, file_)
+            if os.path.exists(dst_file):
+                # os.remove(dst_file)
+                continue
+            shutil.copy2(src_file, dst_dir)
 
 if __name__ == "__main__":
 
@@ -444,6 +504,7 @@ if __name__ == "__main__":
     parser.add_argument("--augmented_path", default='', help="path for saving augmented SCAMPS videos")
     parser.add_argument("--source_path", default='', help="path for source SCAMPS videos")
     parser.add_argument("--driving_path", default='', help="path for driving videos")
+    parser.add_argument("--dataset", default='UBFC-rPPG', choices=["SCAMPS", "UBFC-rPPG", "PURE"], help="dataset specification")
  
 
     parser.set_defaults(relative=False)
@@ -455,121 +516,75 @@ if __name__ == "__main__":
     try:
         set_start_method('spawn')
     except RuntimeError:
-        pass 
+        print("Error! Unable to set start method to spawn.")
 
     source_directory = opt.source_path
     driving_directory = opt.driving_path
+    augmented_directory = opt.augmented_path
     
-
+    # Load checkpoints
     generator, kp_detector, he_estimator = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, gen=opt.gen, cpu=opt.cpu)
-                
+    print("Checkpoints loaded!")
+
     with open(opt.config) as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
     estimate_jacobian = config['model_params']['common_params']['estimate_jacobian']
-       
-    #Put the result videos in a folder
-    if not os.path.exists('result_video'):
-        os.makedirs('result_video')
 
     #Listing driving video list
     driving_list = os.listdir(driving_directory)
 
     #Listing source video list
-    source_list = os.listdir(source_directory)
+    source_list = sorted(os.listdir(source_directory))
+    
+    copy_folder(source_directory, augmented_directory)
+
+    augmented_list = sorted(os.listdir(augmented_directory))
+    # print(augmented_list)
+
+    # print(source_list[13], augmented_list[13])
 
     file_num = len(source_list)
-    choose_range = choose_range = range(0, file_num)
+    choose_range = range(0, file_num)
     pbar = tqdm(list(choose_range))
 
     # shared data resource
     p_list = []
     running_num = 0
 
+    # Get the available GPU count
+    gpu_count = torch.cuda.device_count()
+    print(f'{gpu_count} GPUs are available!')
+
+    # For testing without MP
     for i in choose_range:
-        process_flag = True
-        while process_flag:  # ensure that every i creates a process
-            if running_num < 8:  # in case of too many processes
-                p = Process(target=augment_motion, \
-                            args=(source_list, driving_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian))
-                p.start()
-                p_list.append(p)
-                running_num += 1
-                process_flag = False
-            for p_ in p_list:
-                if not p_.is_alive():
-                    p_list.remove(p_)
-                    p_.join()
-                    running_num -= 1
-                    pbar.update(1)
-    # join all processes
-    for p_ in p_list:
-        p_.join()
+        gpu_num = running_num % gpu_count
+        augment_motion(opt.dataset, gpu_num, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian)
         pbar.update(1)
     pbar.close()
 
-    # for file in os.listdir(source_directory):
-    #     source_filename = os.fsdecode(file)
+    # With MP
+    # for i in choose_range:
+    #     process_flag = True
+    #     while process_flag:  # ensure that every i creates a process
+    #         if running_num < 4:  # in case of too many processes
+    #             # assign an available GPU to the process
+    #             gpu_num = running_num % gpu_count
 
-    #     if source_filename.endswith(".mat"):
-    #         source_video = []
-    #         source_video = read_scamps_video(os.path.join(source_directory, source_filename))
-    #         source_video.tolist()
-    #         print("source: ",os.path.join(source_directory, source_filename))
-    #     elif source_filename.endswith(".avi"):
-    #         source_video = []
-    #         source_video = read_ubfc_video(os.path.join(source_directory, source_filename)) 
-    #         source_video.tolist() 
-
-    #     #Randomize the driving list sequence
-    #     driving_path = np.random.choice(driving_list, 1)[0]
-        
-    #     driving_filename = os.fsdecode(driving_path)    
-
-    #     source_video_name = os.path.splitext(source_filename)[0]
-    #     driving_video_name = os.path.splitext(driving_filename)[0]
-    #     filename = source_video_name + '_' + driving_video_name + '.mat'
-
-    #     while os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
-    #         driving_path = np.random.choice(driving_list, 1)[0]
-    #         driving_filename = os.fsdecode(driving_path)
-    #         driving_video_name = os.path.splitext(driving_filename)[0]
-    #         filename = source_video_name + '_' + driving_video_name + '.mat'
-
-    #     try:
-    #         reader = imageio.get_reader(os.path.join(driving_directory, driving_filename))
-    #     except ValueError:
-    #         continue
-    #     print("driving: ",os.path.join(driving_directory, driving_filename))
-    #     fps = reader.get_meta_data()['fps']
-    #     driving_video = []
-
-    #     try:
-    #         for im in reader:
-    #             driving_video.append(im)
-    #     except RuntimeError:
-    #         pass
-    #     reader.close()
-
-    #     driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
-    #     print("Driving shape: ",np.shape(driving_video))
-
-    #     if(np.shape(driving_video)[0] < np.shape(source_video)[0]):
-    #     #Making total frames same
-    #         source_length = len(source_video)
-    #         driving_length = len(driving_video)
-    #         if source_length > driving_length:
-    #             to_add = source_length - driving_length
-    #             reversed_driving = driving_video[::-1]
-    #             while to_add>0:
-    #                 if to_add < driving_length:
-    #                     driving_video = np.vstack([driving_video,reversed_driving[:to_add]])
-    #                     to_add = -1
-    #                 else:
-    #                     driving_video = np.vstack([driving_video,reversed_driving])
-    #                     reversed_driving = reversed_driving[::-1]
-    #                     to_add -= driving_length
-    #             print("Finishing resizing")
-
-    #     name = source_filename + "_" + driving_filename 
-    #     make_video(opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,source_directory, source_filename, driving_filename, opt.augmented_path)
-          
+    #             p = Process(target=augment_motion, \
+    #                         args=(opt.dataset, gpu_num, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian))
+    #             p.start()
+    #             p_list.append(p)
+    #             running_num += 1
+    #             process_flag = False
+    #         for p_ in p_list:
+    #             if not p_.is_alive():
+    #                 p_list.remove(p_)
+    #                 p_.join()
+    #                 running_num -= 1
+    #                 pbar.update(1)
+    #     time.sleep(60 * 3)
+    # # join all processes
+    # for p_ in p_list:
+    #     p_.join()
+    #     pbar.update(1)
+    # pbar.close()
