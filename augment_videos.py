@@ -1,6 +1,6 @@
 import matplotlib
 matplotlib.use('Agg')
-import os, sys
+import os, sys, glob
 import time
 import shutil
 import yaml
@@ -202,13 +202,6 @@ def make_animation(gpu, source_image, driving_video, frame_num, generator, kp_de
         out = generator(source, kp_source=kp_source, kp_driving=kp_norm)
 
         predictions.append(np.transpose(out['prediction'].data.cpu().numpy(), [0, 2, 3, 1])[0])
-
-        # Try to clean-up here to reduce GPU memory footprint with MP
-        del source
-        del driving
-        del driving_frame
-        gc.collect()
-        torch.cuda.empty_cache()
     return predictions
 
 # def find_best_frame(source, driving, cpu=False):
@@ -265,6 +258,16 @@ def read_ubfc_video(video_file):
     vid.stop()
     return np.asarray(frames)
 
+def read_pure_video(video_file):
+    """Reads a video file, returns frames(T, H, W, 3) """
+    frames = list()
+    all_png = sorted(glob.glob(video_file + '*.png'))
+    for png_path in all_png:
+        img = cv2.imread(png_path)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        frames.append(img)
+    return np.asarray(frames)
+
 # Read_video to convert video file to numpy array
 def read_scamps_video(video_file):
     """Reads a video file, returns frames(T,H,W,3) """
@@ -318,6 +321,16 @@ def make_video(dataset, gpu, opt, source_video, driving_video,generator,kp_detec
         driving_video_name = os.path.splitext(driving_filename)[0]
         filename = source_video_name + '_' + driving_video_name + '.npy'
         np.save(os.path.join(augmented_path, source_video_name, filename), final_preds)
+    elif dataset == 'PURE':
+        final_preds = [resize(frame, (480, 640))[..., :3] for frame in np_preds]
+        source_video_name = os.path.splitext(source_filename)[0]
+        driving_video_name = os.path.splitext(driving_filename)[0]
+        filename = source_video_name + '_' + driving_video_name + '.npy'
+        np.save(os.path.join(augmented_path, source_video_name, source_video_name, filename), final_preds)
+    
+    # # Clean-up
+    # gc.collect()
+    # torch.cuda.empty_cache()
     return
 
 # Resize back to original size
@@ -353,6 +366,8 @@ def face_detection(frame, use_larger_box=False, larger_box_coef=1.0):
     return face_box_coor
 
 def augment_motion(dataset, gpu, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector, he_estimator, estimate_jacobian):
+    # TODO: Add error handling throughout this function
+    
     source_filename = os.fsdecode(source_list[i])
 
     if source_filename.endswith(".mat"):
@@ -364,6 +379,11 @@ def augment_motion(dataset, gpu, source_list, driving_list, augmented_list, i, o
         source_video = []
         print("source: ",os.path.join(source_directory, source_filename, f'{source_filename}_vid.avi'))
         source_video = read_ubfc_video(os.path.join(source_directory, source_filename, f'{source_filename}_vid.avi')) 
+        source_video.tolist()
+    elif dataset == 'PURE':
+        source_video = []
+        print("source: ",os.path.join(source_directory, source_filename, source_filename, ""))
+        source_video = read_pure_video(os.path.join(source_directory, source_filename, source_filename, "")) 
         source_video.tolist()
 
     print(f'Source Shape: {np.shape(source_video)}')
@@ -407,6 +427,14 @@ def augment_motion(dataset, gpu, source_list, driving_list, augmented_list, i, o
             driving_video_name = os.path.splitext(driving_filename)[0]
             filename = source_video_name + '_' + driving_video_name + '.mat'
     elif dataset == 'UBFC-rPPG':
+        filename = source_video_name + '_' + driving_video_name + '.npy'
+
+        while os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
+            driving_path = np.random.choice(driving_list, 1)[0]
+            driving_filename = os.fsdecode(driving_path)
+            driving_video_name = os.path.splitext(driving_filename)[0]
+            filename = source_video_name + '_' + driving_video_name + '.npy'
+    elif dataset == 'PURE':
         filename = source_video_name + '_' + driving_video_name + '.npy'
 
         while os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
@@ -462,7 +490,7 @@ def copy_folder(src_folder, dst_folder):
         if not os.path.exists(dst_dir):
             os.makedirs(dst_dir)
         for file_ in files:
-            if file_.endswith('.avi'):
+            if file_.endswith('.avi') or file_.endswith('.png'):
                 continue
             src_file = os.path.join(src_dir, file_)
             dst_file = os.path.join(dst_dir, file_)
@@ -556,35 +584,35 @@ if __name__ == "__main__":
     print(f'{gpu_count} GPUs are available!')
 
     # For testing without MP
-    for i in choose_range:
-        gpu_num = running_num % gpu_count
-        augment_motion(opt.dataset, gpu_num, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian)
-        pbar.update(1)
-    pbar.close()
-
-    # With MP
     # for i in choose_range:
-    #     process_flag = True
-    #     while process_flag:  # ensure that every i creates a process
-    #         if running_num < 4:  # in case of too many processes
-    #             # assign an available GPU to the process
-    #             gpu_num = running_num % gpu_count
-
-    #             p = Process(target=augment_motion, \
-    #                         args=(opt.dataset, gpu_num, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian))
-    #             p.start()
-    #             p_list.append(p)
-    #             running_num += 1
-    #             process_flag = False
-    #         for p_ in p_list:
-    #             if not p_.is_alive():
-    #                 p_list.remove(p_)
-    #                 p_.join()
-    #                 running_num -= 1
-    #                 pbar.update(1)
-    #     time.sleep(60 * 3)
-    # # join all processes
-    # for p_ in p_list:
-    #     p_.join()
+    #     gpu_num = running_num % gpu_count
+    #     augment_motion(opt.dataset, gpu_num, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian)
     #     pbar.update(1)
     # pbar.close()
+
+    # With MP
+    for i in choose_range:
+        process_flag = True
+        while process_flag:  # ensure that every i creates a process
+            if running_num < 4:  # in case of too many processes
+                # assign an available GPU to the process
+                gpu_num = running_num % gpu_count
+
+                p = Process(target=augment_motion, \
+                            args=(opt.dataset, gpu_num, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian))
+                p.start()
+                p_list.append(p)
+                running_num += 1
+                process_flag = False
+            for p_ in p_list:
+                if not p_.is_alive():
+                    p_list.remove(p_)
+                    p_.join()
+                    running_num -= 1
+                    pbar.update(1)
+        time.sleep(60 * 3)
+    # join all processes
+    for p_ in p_list:
+        p_.join()
+        pbar.update(1)
+    pbar.close()
