@@ -1,6 +1,6 @@
 import os
 
-source_dir = "/playpen-nas-hdd/UNC_Google_Physio/UBFC-rPPG/DATASET_2_backup/DATASET_2/val"
+source_dir = "/put/your/file/path/here"
 
 for root, dirs, files in os.walk(source_dir):
     for filename in files:
