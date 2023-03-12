@@ -3,9 +3,9 @@ import os
 import shutil
 import time
 
-src_dir = '/playpen-nas-ssd/data/datasets/TalkingHead-1KH/train/use_pose'
-dst_dir = '/playpen-nas-ssd/data/datasets/TalkingHead-1KH/train/category_UBFC-PHYS_T2'
-csv_file = '/playpen-nas-ssd/yulupan/more_plots/match/csv/match_ubfc_talkinghead_no_dupes.csv'
+src_dir = "/put/your/file/path/here"
+dst_dir = "/put/your/file/path/here"
+csv_file = "/put/your/file/path/here"
 
 i=0
 with open(csv_file, 'r') as f:

@@ -135,17 +135,17 @@ def keypoint_transformation(gpu, kp_canonical, he, estimate_jacobian=True, free_
         roll = headpose_pred_to_degree(roll)
     else:
         if yaw is not None:
-            yaw = torch.tensor([yaw]).cuda(gpu)
+            yaw = torch.tensor([yaw]).cuda()
         else:
             yaw = he['yaw']
             yaw = headpose_pred_to_degree(yaw)
         if pitch is not None:
-            pitch = torch.tensor([pitch]).cuda(gpu)
+            pitch = torch.tensor([pitch]).cuda()
         else:
             pitch = he['pitch']
             pitch = headpose_pred_to_degree(pitch)
         if roll is not None:
-            roll = torch.tensor([roll]).cuda(gpu)
+            roll = torch.tensor([roll]).cuda()
         else:
             roll = he['roll']
             roll = headpose_pred_to_degree(roll)
@@ -178,10 +178,10 @@ def make_animation(gpu, source_image, driving_video, frame_num, generator, kp_de
         predictions = []
         source = torch.tensor(source_image[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2)
         if not cpu:
-            source = source.cuda(gpu)
+            source = source.cuda()
         driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3)
         if not cpu:
-            driving = driving.cuda(gpu)
+            driving = driving.cuda()
         kp_canonical = kp_detector(source)
         he_source = he_estimator(source)
         he_driving_initial = he_estimator(driving[:, :, 0])
@@ -193,7 +193,7 @@ def make_animation(gpu, source_image, driving_video, frame_num, generator, kp_de
         # for frame_idx in tqdm(range(driving.shape[2])):
         driving_frame = driving[:, :, frame_num]
         if not cpu:
-            driving_frame = driving_frame.cuda(gpu)
+            driving_frame = driving_frame.cuda()
         he_driving = he_estimator(driving_frame)
         kp_driving = keypoint_transformation(gpu, kp_canonical, he_driving, estimate_jacobian, free_view=free_view, yaw=yaw, pitch=pitch, roll=roll)
         kp_norm = normalize_kp(kp_source=kp_source, kp_driving=kp_driving,
@@ -202,6 +202,10 @@ def make_animation(gpu, source_image, driving_video, frame_num, generator, kp_de
         out = generator(source, kp_source=kp_source, kp_driving=kp_norm)
 
         predictions.append(np.transpose(out['prediction'].data.cpu().numpy(), [0, 2, 3, 1])[0])
+    # Clean-up
+    del source
+    del driving
+    del driving_frame
     return predictions
 
 # def find_best_frame(source, driving, cpu=False):
@@ -230,33 +234,33 @@ def make_animation(gpu, source_image, driving_video, frame_num, generator, kp_de
 #             frame_num = i
 #     return frame_num
 
-# def read_ubfc_video(video_file):
-#         """Reads a video file, returns frames(T,H,W,3) """
-#         VidObj = cv2.VideoCapture(video_file)
-#         VidObj.set(cv2.CAP_PROP_POS_MSEC, 0)
-#         success, frame = VidObj.read()
-#         frames = list()
-#         while success:
-#             frame = cv2.cvtColor(np.array(frame), cv2.COLOR_BGR2RGB)
-#             frame = np.asarray(frame)
-#             frames.append(frame)
-#             success, frame = VidObj.read()
-#         print(np.shape(frames))
-#         return np.asarray(frames)
-
 def read_ubfc_video(video_file):
-    """Reads a video file, returns frames(T,H,W,3) """
-    vid = VideoGear(source=video_file).start()
-    frames = []
-    while True:
-        frame = vid.read()
-        if frame is None:
-            break
-        frame = cv2.cvtColor(np.array(frame), cv2.COLOR_BGR2RGB)
-        frame = np.asarray(frame)
-        frames.append(frame)
-    vid.stop()
-    return np.asarray(frames)
+        """Reads a video file, returns frames(T,H,W,3) """
+        VidObj = cv2.VideoCapture(video_file)
+        VidObj.set(cv2.CAP_PROP_POS_MSEC, 0)
+        success, frame = VidObj.read()
+        frames = list()
+        while success:
+            frame = cv2.cvtColor(np.array(frame), cv2.COLOR_BGR2RGB)
+            frame = np.asarray(frame)
+            frames.append(frame)
+            success, frame = VidObj.read()
+        print(np.shape(frames))
+        return np.asarray(frames)
+
+# def read_ubfc_video(video_file):
+#     """Reads a video file, returns frames(T,H,W,3) """
+#     vid = VideoGear(source=video_file).start()
+#     frames = []
+#     while True:
+#         frame = vid.read()
+#         if frame is None:
+#             break
+#         frame = cv2.cvtColor(np.array(frame), cv2.COLOR_BGR2RGB)
+#         frame = np.asarray(frame)
+#         frames.append(frame)
+#     vid.stop()
+#     return np.asarray(frames)
 
 def read_pure_video(video_file):
     """Reads a video file, returns frames(T, H, W, 3) """
@@ -279,6 +283,9 @@ def read_scamps_video(video_file):
 def save_video(video_file_path, video_file, driving_video_file, new_xsub, save_path):
     """Reads a video file, returns frames(T,H,W,3) """
     mat = mat73.loadmat(os.path.join(video_file_path, video_file))
+    # new_xsub = np.array(new_xsub, dtype=np.float64)
+    # new_xsub = new_xsub / 255
+    # new_xsub.tolist()
     mat['Xsub'] = new_xsub # save raw frames
     source_video_name = os.path.splitext(video_file)[0]
     driving_video_name = os.path.splitext(driving_video_file)[0]
@@ -291,7 +298,7 @@ def make_video(dataset, gpu, opt, source_video, driving_video,generator,kp_detec
     # Set GPU
     torch.cuda.set_device(gpu)
 
-    # frames_pbar = tqdm(list(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))))
+    frames_pbar = tqdm(list(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))))
     
     # for frames in tqdm(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))):
     for frames in range(min(np.shape(source_video)[0], np.shape(driving_video)[0])):
@@ -308,15 +315,21 @@ def make_video(dataset, gpu, opt, source_video, driving_video,generator,kp_detec
         else:
             predictions = make_animation(gpu, source_image, driving_video, frames, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
             final_preds.append(predictions)
-            # frames_pbar.update(1)
-    # frames_pbar.close()
+            frames_pbar.update(1)
+    frames_pbar.close()
     np_preds = np.squeeze(np.asarray(final_preds))
 
-    if source_filename.endswith(".mat"):
+    if dataset == 'SCAMPS':
         final_preds = [resize(frame, (240, 240))[..., :3] for frame in np_preds]
         save_video(source_directory, source_filename, driving_filename, final_preds, augmented_path)
     elif dataset == 'UBFC-rPPG':
         final_preds = [resize(frame, (480, 640))[..., :3] for frame in np_preds]
+        source_video_name = os.path.splitext(source_filename)[0]
+        driving_video_name = os.path.splitext(driving_filename)[0]
+        filename = source_video_name + '_' + driving_video_name + '.npy'
+        np.save(os.path.join(augmented_path, source_video_name, filename), final_preds)
+    elif dataset == 'UBFC-PHYS':
+        final_preds = [resize(frame, (1024, 1024))[..., :3] for frame in np_preds]
         source_video_name = os.path.splitext(source_filename)[0]
         driving_video_name = os.path.splitext(driving_filename)[0]
         filename = source_video_name + '_' + driving_video_name + '.npy'
@@ -328,9 +341,9 @@ def make_video(dataset, gpu, opt, source_video, driving_video,generator,kp_detec
         filename = source_video_name + '_' + driving_video_name + '.npy'
         np.save(os.path.join(augmented_path, source_video_name, source_video_name, filename), final_preds)
     
-    # # Clean-up
-    # gc.collect()
-    # torch.cuda.empty_cache()
+    # Clean-up
+    gc.collect()
+    torch.cuda.empty_cache()
     return
 
 # Resize back to original size
@@ -347,7 +360,7 @@ def face_detection(frame, use_larger_box=False, larger_box_coef=1.0):
     Returns:
         face_box_coor(List[int]): coordinates of face bouding box.
     """
-    detector = cv2.CascadeClassifier('/playpen-nas-ssd/akshay/UNC_Google_Physio/MArPPG-Video-Toolbox/utils/haarcascade_frontalface_default.xml')
+    detector = cv2.CascadeClassifier('./utils/haarcascade_frontalface_default.xml')
     face_zone = detector.detectMultiScale(frame)
     if len(face_zone) < 1:
         print("ERROR: No Face Detected")
@@ -370,7 +383,7 @@ def augment_motion(dataset, gpu, source_list, driving_list, augmented_list, i, o
     
     source_filename = os.fsdecode(source_list[i])
 
-    if source_filename.endswith(".mat"):
+    if dataset == 'SCAMPS':
         source_video = []
         source_video = read_scamps_video(os.path.join(source_directory, source_filename))
         source_video.tolist()
@@ -380,6 +393,12 @@ def augment_motion(dataset, gpu, source_list, driving_list, augmented_list, i, o
         print("source: ",os.path.join(source_directory, source_filename, f'{source_filename}_vid.avi'))
         source_video = read_ubfc_video(os.path.join(source_directory, source_filename, f'{source_filename}_vid.avi')) 
         source_video.tolist()
+    elif dataset == 'UBFC-PHYS':
+        source_video = []
+        print("source: ",os.path.join(source_directory, source_filename, f'vid_{source_filename}_T1.avi'))
+        source_video = read_ubfc_video(os.path.join(source_directory, source_filename, f'vid_{source_filename}_T1.avi'))
+        print("I got out of the read function!")
+        # source_video.tolist()
     elif dataset == 'PURE':
         source_video = []
         print("source: ",os.path.join(source_directory, source_filename, source_filename, ""))
@@ -388,27 +407,31 @@ def augment_motion(dataset, gpu, source_list, driving_list, augmented_list, i, o
 
     print(f'Source Shape: {np.shape(source_video)}')
 
-    # Face detection to crop
-    cropped_frames = []
-    face_region_all = []
+    if dataset != 'SCAMPS':
+        # Face detection to crop
+        cropped_frames = []
+        face_region_all = []
 
-    # First, compute the median bounding box across all frames
-    for frame in source_video:
-        face_box = face_detection(frame, True, 2.0)
-        face_region_all.append(face_box)
-    face_region_all = np.asarray(face_region_all, dtype='int')
-    face_region_median = np.median(face_region_all, axis=0).astype('int')
+        # First, compute the median bounding box across all frames
+        for frame in source_video:
+            if dataset == 'PURE':
+                face_box = face_detection(frame, True, 1.7) # PURE
+            else:
+                face_box = face_detection(frame, True, 2.0) # MAUBFC and others
+            face_region_all.append(face_box)
+        face_region_all = np.asarray(face_region_all, dtype='int')
+        face_region_median = np.median(face_region_all, axis=0).astype('int')
 
-    # Apply the median bounding box for cropping and subsequent resizing
-    for frame in source_video:
-        cropped_frame = frame[int(face_region_median[1]):int(face_region_median[1]+face_region_median[3]),
-                              int(face_region_median[0]):int(face_region_median[0]+face_region_median[2])]
-        resized_frame = resize_to_original(cropped_frame, np.shape(source_video)[2], np.shape(source_video)[1])
-        cropped_frames.append(resized_frame)
+        # Apply the median bounding box for cropping and subsequent resizing
+        for frame in source_video:
+            cropped_frame = frame[int(face_region_median[1]):int(face_region_median[1]+face_region_median[3]),
+                                int(face_region_median[0]):int(face_region_median[0]+face_region_median[2])]
+            resized_frame = resize_to_original(cropped_frame, np.shape(source_video)[2], np.shape(source_video)[1])
+            cropped_frames.append(resized_frame)
 
-    source_video = cropped_frames
+        source_video = cropped_frames
 
-    print(f'Cropped Source Shape: {np.shape(source_video)}')
+        print(f'Cropped Source Shape: {np.shape(source_video)}')
 
     #Randomize the driving list sequence
     driving_path = np.random.choice(driving_list, 1)[0]
@@ -418,7 +441,7 @@ def augment_motion(dataset, gpu, source_list, driving_list, augmented_list, i, o
     source_video_name = os.path.splitext(source_filename)[0]
     driving_video_name = os.path.splitext(driving_filename)[0]
 
-    if source_filename.endswith(".mat"):
+    if dataset == 'SCAMPS':
         filename = source_video_name + '_' + driving_video_name + '.mat'
 
         while os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
@@ -427,6 +450,14 @@ def augment_motion(dataset, gpu, source_list, driving_list, augmented_list, i, o
             driving_video_name = os.path.splitext(driving_filename)[0]
             filename = source_video_name + '_' + driving_video_name + '.mat'
     elif dataset == 'UBFC-rPPG':
+        filename = source_video_name + '_' + driving_video_name + '.npy'
+
+        while os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
+            driving_path = np.random.choice(driving_list, 1)[0]
+            driving_filename = os.fsdecode(driving_path)
+            driving_video_name = os.path.splitext(driving_filename)[0]
+            filename = source_video_name + '_' + driving_video_name + '.npy'
+    elif dataset == 'UBFC-PHYS':
         filename = source_video_name + '_' + driving_video_name + '.npy'
 
         while os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
@@ -490,7 +521,7 @@ def copy_folder(src_folder, dst_folder):
         if not os.path.exists(dst_dir):
             os.makedirs(dst_dir)
         for file_ in files:
-            if file_.endswith('.avi') or file_.endswith('.png'):
+            if file_.endswith('.avi') or file_.endswith('.png') or file_.endswith('.mat'):
                 continue
             src_file = os.path.join(src_dir, file_)
             dst_file = os.path.join(dst_dir, file_)
@@ -532,7 +563,7 @@ if __name__ == "__main__":
     parser.add_argument("--augmented_path", default='', help="path for saving augmented SCAMPS videos")
     parser.add_argument("--source_path", default='', help="path for source SCAMPS videos")
     parser.add_argument("--driving_path", default='', help="path for driving videos")
-    parser.add_argument("--dataset", default='UBFC-rPPG', choices=["SCAMPS", "UBFC-rPPG", "PURE"], help="dataset specification")
+    parser.add_argument("--dataset", default='UBFC-rPPG', choices=["SCAMPS", "UBFC-rPPG", "UBFC-PHYS", "PURE"], help="dataset specification")
  
 
     parser.set_defaults(relative=False)
@@ -569,8 +600,6 @@ if __name__ == "__main__":
     augmented_list = sorted(os.listdir(augmented_directory))
     # print(augmented_list)
 
-    # print(source_list[13], augmented_list[13])
-
     file_num = len(source_list)
     choose_range = range(0, file_num)
     pbar = tqdm(list(choose_range))
@@ -584,35 +613,35 @@ if __name__ == "__main__":
     print(f'{gpu_count} GPUs are available!')
 
     # For testing without MP
-    # for i in choose_range:
-    #     gpu_num = running_num % gpu_count
-    #     augment_motion(opt.dataset, gpu_num, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian)
-    #     pbar.update(1)
-    # pbar.close()
-
-    # With MP
     for i in choose_range:
-        process_flag = True
-        while process_flag:  # ensure that every i creates a process
-            if running_num < 4:  # in case of too many processes
-                # assign an available GPU to the process
-                gpu_num = running_num % gpu_count
-
-                p = Process(target=augment_motion, \
-                            args=(opt.dataset, gpu_num, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian))
-                p.start()
-                p_list.append(p)
-                running_num += 1
-                process_flag = False
-            for p_ in p_list:
-                if not p_.is_alive():
-                    p_list.remove(p_)
-                    p_.join()
-                    running_num -= 1
-                    pbar.update(1)
-        time.sleep(60 * 3)
-    # join all processes
-    for p_ in p_list:
-        p_.join()
+        gpu_num = running_num % gpu_count
+        augment_motion(opt.dataset, gpu_num, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian)
         pbar.update(1)
     pbar.close()
+
+    # # With MP
+    # for i in choose_range:
+    #     process_flag = True
+    #     while process_flag:  # ensure that every i creates a process
+    #         if running_num < 4:  # in case of too many processes
+    #             # assign an available GPU to the process
+    #             gpu_num = running_num % gpu_count
+
+    #             p = Process(target=augment_motion, \
+    #                         args=(opt.dataset, gpu_num, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian))
+    #             p.start()
+    #             p_list.append(p)
+    #             running_num += 1
+    #             process_flag = False
+    #         for p_ in p_list:
+    #             if not p_.is_alive():
+    #                 p_list.remove(p_)
+    #                 p_.join()
+    #                 running_num -= 1
+    #                 pbar.update(1)
+    #     time.sleep(60 * 3)
+    # # join all processes
+    # for p_ in p_list:
+    #     p_.join()
+    #     pbar.update(1)
+    # pbar.close()

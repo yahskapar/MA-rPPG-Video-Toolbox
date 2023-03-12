@@ -4,7 +4,6 @@ from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
 
-from logger import Logger, Visualizer
 import imageio
 from scipy.spatial import ConvexHull
 import numpy as np
