@@ -18,6 +18,8 @@ CUDA_VISIBLE_DEVICES=0 python augment_videos.py --config ./checkpoints/checkpoin
 
 The currently supported datasets for augmentation are UBFC-rPPG, PURE, and SCAMPS.
 
+Additionally, we provide motion analysis scripts in the `motion_analysis` folder to generate and analyze videos processed using OpenFace. Please refer to the [OpenFace GitHub repo](https://github.com/TadasBaltrusaitis/OpenFace) for instructions on how to properly install OpenFace. We also provide pre-trained models in `pretrained_models` and example configs and dataloaders in `MA_training` for use with the [rPPG-Toolbox](https://github.com/ubicomplab/rPPG-Toolbox).
+
 Pretrained Model:  
 --------
 
