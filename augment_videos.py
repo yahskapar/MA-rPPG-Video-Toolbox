@@ -208,32 +208,6 @@ def make_animation(gpu, source_image, driving_video, frame_num, generator, kp_de
     del driving_frame
     return predictions
 
-# def find_best_frame(source, driving, cpu=False):
-#     import face_alignment
-
-#     def normalize_kp(kp):
-#         kp = kp - kp.mean(axis=0, keepdims=True)
-#         area = ConvexHull(kp[:, :2]).volume
-#         area = np.sqrt(area)
-#         kp[:, :2] = kp[:, :2] / area
-#         return kp
-
-#     # TODO: Change this if I end up making the best frame method work, probably not needed
-#     fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, flip_input=True,
-#                                       device='cpu' if cpu else 'cuda')
-#     kp_source = fa.get_landmarks(255 * source)[0]
-#     kp_source = normalize_kp(kp_source)
-#     norm  = float('inf')
-#     frame_num = 0
-#     for i, image in tqdm(enumerate(driving)):
-#         kp_driving = fa.get_landmarks(255 * image)[0]
-#         kp_driving = normalize_kp(kp_driving)
-#         new_norm = (np.abs(kp_source - kp_driving) ** 2).sum()
-#         if new_norm < norm:
-#             norm = new_norm
-#             frame_num = i
-#     return frame_num
-
 def read_ubfc_video(video_file):
         """Reads a video file, returns frames(T,H,W,3) """
         VidObj = cv2.VideoCapture(video_file)
@@ -247,20 +221,6 @@ def read_ubfc_video(video_file):
             success, frame = VidObj.read()
         print(np.shape(frames))
         return np.asarray(frames)
-
-# def read_ubfc_video(video_file):
-#     """Reads a video file, returns frames(T,H,W,3) """
-#     vid = VideoGear(source=video_file).start()
-#     frames = []
-#     while True:
-#         frame = vid.read()
-#         if frame is None:
-#             break
-#         frame = cv2.cvtColor(np.array(frame), cv2.COLOR_BGR2RGB)
-#         frame = np.asarray(frame)
-#         frames.append(frame)
-#     vid.stop()
-#     return np.asarray(frames)
 
 def read_pure_video(video_file):
     """Reads a video file, returns frames(T, H, W, 3) """
@@ -544,11 +504,6 @@ if __name__ == "__main__":
  
     parser.add_argument("--relative", dest="relative", action="store_true", help="use relative or absolute keypoint coordinates")
     parser.add_argument("--adapt_scale", dest="adapt_scale", action="store_true", help="adapt movement scale based on convex hull of keypoints")
-
-    # Don't use this as this eventually breaks things when using a 
-    # multi-frame source and a multi-frame driving 
-    parser.add_argument("--find_best_frame", dest="find_best_frame", action="store_true", 
-                        help="Generate from the frame that is the most alligned with source. (Only for faces, requires face_aligment lib)")
 
     parser.add_argument("--best_frame", dest="best_frame", type=int, default=None,  
                         help="Set frame to start from.")
