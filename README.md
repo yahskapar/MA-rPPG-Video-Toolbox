@@ -1,27 +1,40 @@
 # Motion Matters: Neural Motion Transfer for Better Camera Physiological Sensing
 
+[Pre-print](https://arxiv.org/abs/2303.12059) | [Project Website](https://motion-matters.github.io/)
+
 ## Abstract
+
 Machine learning models for camera-based physiological measurement can have weak generalization due to a lack of representative training data. Body motion is one of the most significant sources of noise when attempting to recover the subtle cardiac pulse from a video. We explore motion transfer as a form of data augmentation to introduce motion variation while preserving physiological changes. We adapt a neural video synthesis approach to augment videos for the task of remote photoplethysmography (PPG) and study the effects of motion augmentation with respect to 1. the magnitude and 2. the type of motion. After training on motion-augmented versions of publicly available datasets, the presented inter-dataset results on five benchmark datasets show improvements of up to 75% over existing state-of-the-art results. Our findings illustrate the utility of motion transfer as a data augmentation technique for improving the generalization of models for camera-based physiological sensing. We release our code and pre-trained models for using motion transfer as a data augmentation technique.
 
-## Code Description
+# Setup
 
-This motion-augmentation technique for real and/or synthetic datasets used for training models toward camera measurement of physiological signals utilizes an unofficial pytorch implementation of the paper "One-Shot Free-View Neural Talking-Head Synthesis for Video Conferencing" by Ting-Chun Wang, Arun Mallya, and Ming-Yu Liu (NVIDIA). A link to the original, unofficial implementation can be found [here](https://github.com/zhanglonghao1992/One-Shot_Free-View_Neural_Talking_Head_Synthesis). ```Python 3.6``` and ```Pytorch 1.7``` are used in Linux Mint 21 Cinnamon. An ```environment.yml``` is provided in the repo for easier installation of the dependencies required. You can use that environment file when creating the conda environment as follows: ```conda env create -f environment.yml```.
+STEP1: `bash setup.sh` 
 
-Here's a typical workflow with the current (03/13/2023) iteration of this code:
+STEP2: `conda activate ma-rppg-video-toolbox` 
 
-1. In a conda environment, install required dependencies using the environment.yml file as described above. Make sure you are utilizing Python 3.6 and Pytorch 1.7 or higher as well.
-2. Download a pretrained model from the below table of pretrained models. In the future, instructins will be provided to utilize a modified train.py for training a new model from scratch or training from existing pretrained models.
-3. Augment pairs of source videos and driving videos (using GPU):
+STEP3: `pip install -r requirements.txt`
+
+STEP 4: `pip install torch==1.8.2 torchvision==0.9.2 torchaudio==0.8.2 --extra-index-url https://download.pytorch.org/whl/lts/1.8/cu111`
+
+STEP 5: Download the appropriate [pre-trained model](#pretrained-models) and place it in the appropriate folder within `checkpoints/`. We recommend using Vox-256-New over Vox-256-Beta.
+
+# Usage
+
+This motion-augmentation pipeline supports three rPPG video datasets - UBFC-rPPG, PURE, and SCAMPS. The pipeline utilizes an unofficial pytorch implementation of the paper "One-Shot Free-View Neural Talking-Head Synthesis for Video Conferencing" by Ting-Chun Wang, Arun Mallya, and Ming-Yu Liu (NVIDIA). A link to the original, unofficial implementation can be found [here](https://github.com/zhanglonghao1992/One-Shot_Free-View_Neural_Talking_Head_Synthesis). `Python 3.6.13` and `Pytorch 1.8.2` are used.
+
+Below is a basic example of utilizing `augment_videos.py` to augment all subjects provided in the UBFC-rPPG with motion based on a supplied directory of driving videos and the Vox-256-New pre-trained model:
 ```
 CUDA_VISIBLE_DEVICES=0 python augment_videos.py --config ./checkpoints/checkpoint_new/vox-256-spade.yaml --checkpoint ./checkpoints/checkpoint_new/00000189-checkpoint.pth.tar --source_path /path/to/source/dataset/folder --driving_path /path/to/driving/dataset/folder --augmented_path /path/to/augmented/dataset/folder/to/generate --relative --adapt_scale --dataset UBFC-rPPG
 ```
+Note that an augmented output path is specified with `--augmented_path`. The augmented output includes the exact same folder structure as the input dataset (e.g., UBFC-rPPG dataset's DATASET2 folder structure), and contains all  of the corresponding ground truth files that are copied over.
 
-The currently supported datasets for augmentation are UBFC-rPPG, PURE, and SCAMPS.
+A naive implementation of multiprocessing can be enabled with the `--mp` command line option to speed-up the motion augmentation pipeline. Depending on your computing environment, this is not recommended. Multiprocessing support will be refined in a future update to this code repository.
 
 Additionally, we provide motion analysis scripts in the `motion_analysis` folder to generate and analyze videos processed using OpenFace. Please refer to the [OpenFace GitHub repo](https://github.com/TadasBaltrusaitis/OpenFace) for instructions on how to properly install OpenFace. We also provide pre-trained models in `pretrained_models` and example configs and dataloaders in `MA_training` for use with the [rPPG-Toolbox](https://github.com/ubicomplab/rPPG-Toolbox).
 
-Pretrained Model:  
---------
+# Pretrained Models
+
+The below pre-trained models were obtained from [here]([here](https://github.com/zhanglonghao1992/One-Shot_Free-View_Neural_Talking_Head_Synthesis)).
 
   Model  |  Train Set   | Baidu Netdisk | Media Fire | 
  ------- |------------  |-----------    |--------      |
@@ -29,6 +42,5 @@ Pretrained Model:
  Vox-256-New | VoxCeleb-v1  |  -  |  [MF](https://www.mediafire.com/folder/fcvtkn21j57bb/TalkingHead_Update)  |
  Vox-512 | VoxCeleb-v2  |  soon  |  soon  |
 
- Acknowlegement: 
---------
+# Acknowledgments
 Thanks to [zhanglonghao1992](https://github.com/zhanglonghao1992/One-Shot_Free-View_Neural_Talking_Head_Synthesis), [NV](https://github.com/NVlabs/face-vid2vid), [AliaksandrSiarohin](https://github.com/AliaksandrSiarohin/first-order-model), and [DeepHeadPose](https://github.com/DriverDistraction/DeepHeadPose) for their useful code implementations!
