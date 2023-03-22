@@ -2,6 +2,8 @@
 
 [Pre-print](https://arxiv.org/abs/2303.12059) | [Project Website](https://motion-matters.github.io/)
 
+![Examples of motion augmentation applied to subjects in the UBFC-rPPG dataset.](./assets/ma_rppg_video_toolbox_teaser.gif)
+
 ## Abstract
 
 Machine learning models for camera-based physiological measurement can have weak generalization due to a lack of representative training data. Body motion is one of the most significant sources of noise when attempting to recover the subtle cardiac pulse from a video. We explore motion transfer as a form of data augmentation to introduce motion variation while preserving physiological changes. We adapt a neural video synthesis approach to augment videos for the task of remote photoplethysmography (PPG) and study the effects of motion augmentation with respect to 1. the magnitude and 2. the type of motion. After training on motion-augmented versions of publicly available datasets, the presented inter-dataset results on five benchmark datasets show improvements of up to 75% over existing state-of-the-art results. Our findings illustrate the utility of motion transfer as a data augmentation technique for improving the generalization of models for camera-based physiological sensing. We release our code and pre-trained models for using motion transfer as a data augmentation technique.
