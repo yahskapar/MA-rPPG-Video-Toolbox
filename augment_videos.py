@@ -40,9 +40,6 @@ from torch.multiprocessing import Pool, Process, Value, Array, Manager, set_star
 if sys.version_info[0] < 3:
     raise Exception("You must use Python 3 or higher. Recommended version is Python 3.7")
 
-# TODO: Might need to do this for every running process rather than just once
-# Does CUDA effectively deal with calling the generator, detector, and estimator
-# on tensors on different devices??
 def load_checkpoints(config_path, checkpoint_path, gen, cpu=False):
 
     with open(config_path) as f:
@@ -519,6 +516,7 @@ if __name__ == "__main__":
     parser.add_argument("--source_path", default='', help="path for source SCAMPS videos")
     parser.add_argument("--driving_path", default='', help="path for driving videos")
     parser.add_argument("--dataset", default='UBFC-rPPG', choices=["SCAMPS", "UBFC-rPPG", "UBFC-PHYS", "PURE"], help="dataset specification")
+    parser.add_argument("--mp", dest="mp", action="store_true", help="use multiprocessing")
  
 
     parser.set_defaults(relative=False)
@@ -567,36 +565,38 @@ if __name__ == "__main__":
     gpu_count = torch.cuda.device_count()
     print(f'{gpu_count} GPUs are available!')
 
-    # For testing without MP
-    for i in choose_range:
-        gpu_num = running_num % gpu_count
-        augment_motion(opt.dataset, gpu_num, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian)
-        pbar.update(1)
-    pbar.close()
+    if opt.mp is False:
+        # Single process
+        for i in choose_range:
+            gpu_num = running_num % gpu_count
+            augment_motion(opt.dataset, gpu_num, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian)
+            pbar.update(1)
+        pbar.close()
+    elif opt.mp is True:
+        # Use multiprocessing
+        print("Multiprocessing is being used!")
+        for i in choose_range:
+            process_flag = True
+            while process_flag:  # ensure that every i creates a process
+                if running_num < 4:  # in case of too many processes
+                    # assign an available GPU to the process
+                    gpu_num = running_num % gpu_count
 
-    # # With MP
-    # for i in choose_range:
-    #     process_flag = True
-    #     while process_flag:  # ensure that every i creates a process
-    #         if running_num < 4:  # in case of too many processes
-    #             # assign an available GPU to the process
-    #             gpu_num = running_num % gpu_count
-
-    #             p = Process(target=augment_motion, \
-    #                         args=(opt.dataset, gpu_num, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian))
-    #             p.start()
-    #             p_list.append(p)
-    #             running_num += 1
-    #             process_flag = False
-    #         for p_ in p_list:
-    #             if not p_.is_alive():
-    #                 p_list.remove(p_)
-    #                 p_.join()
-    #                 running_num -= 1
-    #                 pbar.update(1)
-    #     time.sleep(60 * 3)
-    # # join all processes
-    # for p_ in p_list:
-    #     p_.join()
-    #     pbar.update(1)
-    # pbar.close()
+                    p = Process(target=augment_motion, \
+                                args=(opt.dataset, gpu_num, source_list, driving_list, augmented_list, i, opt, running_num, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian))
+                    p.start()
+                    p_list.append(p)
+                    running_num += 1
+                    process_flag = False
+                for p_ in p_list:
+                    if not p_.is_alive():
+                        p_list.remove(p_)
+                        p_.join()
+                        running_num -= 1
+                        pbar.update(1)
+            # time.sleep(60 * 3)
+        # join all processes
+        for p_ in p_list:
+            p_.join()
+            pbar.update(1)
+        pbar.close()
