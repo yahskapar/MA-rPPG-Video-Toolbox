@@ -14,7 +14,9 @@ STEP2: `conda activate ma-rppg-video-toolbox`
 
 STEP3: `pip install -r requirements.txt`
 
-STEP 4: `pip install torch==1.8.2 torchvision==0.9.2 torchaudio==0.8.2 --extra-index-url https://download.pytorch.org/whl/lts/1.8/cu111`
+STEP 4: 
+
+`pip install torch==1.8.2 torchvision==0.9.2 torchaudio==0.8.2 --extra-index-url https://download.pytorch.org/whl/lts/1.8/cu111`
 
 STEP 5: Download the appropriate [pre-trained model](#pretrained-models) and place it in the appropriate folder within `checkpoints/`. We recommend using Vox-256-New over Vox-256-Beta.
 
