@@ -30,7 +30,7 @@ This motion-augmentation pipeline supports three rPPG video datasets - UBFC-rPPG
 
 Below is a basic example of utilizing `augment_videos.py` to augment all subjects provided in the UBFC-rPPG with motion based on a supplied directory of driving videos and the Vox-256-New pre-trained model:
 ```
-CUDA_VISIBLE_DEVICES=0 python augment_videos.py --config ./checkpoints/checkpoint_new/vox-256-spade.yaml --checkpoint ./checkpoints/checkpoint_new/00000189-checkpoint.pth.tar --source_path /path/to/source/dataset/folder --driving_path /path/to/driving/dataset/folder --augmented_path /path/to/augmented/dataset/folder/to/generate --relative --adapt_scale --dataset UBFC-rPPG
+python augment_videos.py --config ./checkpoints/checkpoint_new/vox-256-spade.yaml --checkpoint ./checkpoints/checkpoint_new/00000189-checkpoint.pth.tar --source_path /path/to/source/dataset/folder --driving_path /path/to/driving/dataset/folder --augmented_path /path/to/augmented/dataset/folder/to/generate --relative --adapt_scale --dataset UBFC-rPPG
 ```
 Note that an augmented output path is specified with `--augmented_path`. The augmented output includes the exact same folder structure as the input dataset (e.g., UBFC-rPPG dataset's DATASET2 folder structure), and contains all  of the corresponding ground truth files that are copied over.
 
