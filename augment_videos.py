@@ -486,6 +486,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", default='config/vox-256.yaml', help="path to config")
     parser.add_argument("--checkpoint", default='', help="path to checkpoint to restore")
 
+    # Args when processing just a single video, and not a dataset
     parser.add_argument("--source_image", default='', help="path to source image")
     parser.add_argument("--driving_video", default='', help="path to driving video")
     parser.add_argument("--result_video", default='result.mp4', help="path to output")
@@ -495,9 +496,6 @@ if __name__ == "__main__":
     parser.add_argument("--relative", dest="relative", action="store_true", help="use relative or absolute keypoint coordinates")
     parser.add_argument("--adapt_scale", dest="adapt_scale", action="store_true", help="adapt movement scale based on convex hull of keypoints")
 
-    parser.add_argument("--best_frame", dest="best_frame", type=int, default=None,  
-                        help="Set frame to start from.")
- 
     parser.add_argument("--cpu", dest="cpu", action="store_true", help="cpu mode.")
 
     parser.add_argument("--free_view", dest="free_view", action="store_true", help="control head pose")
