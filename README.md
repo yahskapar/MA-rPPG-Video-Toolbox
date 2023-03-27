@@ -50,3 +50,17 @@ The below pre-trained models were obtained from [here]([here](https://github.com
 
 # Acknowledgments
 Thanks to [zhanglonghao1992](https://github.com/zhanglonghao1992/One-Shot_Free-View_Neural_Talking_Head_Synthesis), [NV](https://github.com/NVlabs/face-vid2vid), [AliaksandrSiarohin](https://github.com/AliaksandrSiarohin/first-order-model), and [DeepHeadPose](https://github.com/DriverDistraction/DeepHeadPose) for their useful code implementations!
+
+# Citation
+If you find our [paper](https://arxiv.org/abs/2303.12059) or this toolbox useful for your research, please cite our work.
+
+```
+@misc{paruchuri2023motion,
+      title={Motion Matters: Neural Motion Transfer for Better Camera Physiological Sensing}, 
+      author={Akshay Paruchuri and Xin Liu and Yulu Pan and Shwetak Patel and Daniel McDuff and Soumyadip Sengupta},
+      year={2023},
+      eprint={2303.12059},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV}
+}
+```
