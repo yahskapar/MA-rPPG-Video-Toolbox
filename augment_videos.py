@@ -255,24 +255,17 @@ def make_video(dataset, gpu, opt, source_video, driving_video,generator,kp_detec
     # Set GPU
     torch.cuda.set_device(gpu)
 
+    # The progress bar will effectively be broken when multi-processing is used
+    # A fix will be implemented in a future update to this toolbox
     frames_pbar = tqdm(list(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))))
     
     # for frames in tqdm(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))):
     for frames in range(min(np.shape(source_video)[0], np.shape(driving_video)[0])):
         source_image = resize(source_video[frames], (256, 256))[..., :3]
         #print(f'estimate jacobian: {estimate_jacobian}')
-        if opt.find_best_frame or opt.best_frame is not None:
-            i = opt.best_frame if opt.best_frame is not None else find_best_frame(source_image, driving_video, cpu=opt.cpu)
-            print ("Best frame: " + str(i))
-            driving_forward = driving_video[i:]
-            driving_backward = driving_video[:(i+1)][::-1]
-            predictions_forward = make_animation(gpu, source_image, driving_forward, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
-            predictions_backward = make_animation(gpu, source_image, driving_backward, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
-            predictions = predictions_backward[::-1] + predictions_forward[1:]
-        else:
-            predictions = make_animation(gpu, source_image, driving_video, frames, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
-            final_preds.append(predictions)
-            frames_pbar.update(1)
+        predictions = make_animation(gpu, source_image, driving_video, frames, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
+        final_preds.append(predictions)
+        frames_pbar.update(1)
     frames_pbar.close()
     np_preds = np.squeeze(np.asarray(final_preds))
 
@@ -578,7 +571,7 @@ if __name__ == "__main__":
         for i in choose_range:
             process_flag = True
             while process_flag:  # ensure that every i creates a process
-                if running_num < 4:  # in case of too many processes
+                if running_num < 5:  # in case of too many processes
                     # assign an available GPU to the process
                     gpu_num = running_num % gpu_count
 
@@ -594,7 +587,7 @@ if __name__ == "__main__":
                         p_.join()
                         running_num -= 1
                         pbar.update(1)
-            # time.sleep(60 * 3)
+            time.sleep(60 * 3)
         # join all processes
         for p_ in p_list:
             p_.join()
