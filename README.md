@@ -26,7 +26,7 @@ STEP 5: Download the appropriate [pre-trained model](#pretrained-models) and pla
 
 # Usage
 
-This motion-augmentation pipeline supports three rPPG video datasets - UBFC-rPPG, PURE, and SCAMPS. The pipeline utilizes an unofficial pytorch implementation of the paper [One-Shot Free-View Neural Talking-Head Synthesis for Video Conferencing](https://github.com/Roni-Lab/MA-rPPG-Video-Toolbox) by Ting-Chun Wang, Arun Mallya, and Ming-Yu Liu (NVIDIA). A link to the original, unofficial implementation can be found [here](https://github.com/zhanglonghao1992/One-Shot_Free-View_Neural_Talking_Head_Synthesis). `Python 3.6.13` and `Pytorch 1.8.2` are used.
+This motion-augmentation pipeline supports three rPPG video datasets - UBFC-rPPG, PURE, and SCAMPS. The pipeline utilizes an unofficial pytorch implementation of the paper [One-Shot Free-View Neural Talking-Head Synthesis for Video Conferencing](https://nvlabs.github.io/face-vid2vid/) by Ting-Chun Wang, Arun Mallya, and Ming-Yu Liu (NVIDIA). A link to the original, unofficial implementation can be found [here](https://github.com/zhanglonghao1992/One-Shot_Free-View_Neural_Talking_Head_Synthesis). `Python 3.6.13` and `Pytorch 1.8.2` are used.
 
 Below is a basic example of utilizing `augment_videos.py` to augment all subjects provided in the UBFC-rPPG with motion based on a supplied directory of driving videos and the Vox-256-New pre-trained model:
 ```
