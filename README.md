@@ -22,7 +22,7 @@ STEP 4: Install PyTorch using the below command,
 pip install torch==1.8.2 torchvision==0.9.2 torchaudio==0.8.2 --extra-index-url https://download.pytorch.org/whl/lts/1.8/cu111
 ```
 
-STEP 5: Download the appropriate [pre-trained model](#pretrained-models) and place it in the appropriate folder within `checkpoints/`. We recommend using Vox-256-New over Vox-256-Beta.
+STEP 5: Download the appropriate [pre-trained model](#pretrained-models) and place it in the appropriate folder within `checkpoints/`. We recommend using Vox-256-New over Vox-256-Beta. You will also have to place the appropriate `.yaml` file in the `config/` folder, and make sure it's appropriately pointed to using the `--config` parameter when running `augment_videos.py`.
 
 # Usage
 
@@ -32,21 +32,32 @@ Below is a basic example of utilizing `augment_videos.py` to augment all subject
 ```
 python augment_videos.py --config ./checkpoints/checkpoint_new/vox-256-spade.yaml --checkpoint ./checkpoints/checkpoint_new/00000189-checkpoint.pth.tar --source_path /path/to/source/dataset/folder --driving_path /path/to/driving/dataset/folder --augmented_path /path/to/augmented/dataset/folder/to/generate --relative --adapt_scale --dataset UBFC-rPPG
 ```
-Note that an augmented output path is specified with `--augmented_path`. The augmented output includes the exact same folder structure as the input dataset (e.g., UBFC-rPPG dataset's DATASET2 folder structure), and contains all  of the corresponding ground truth files that are copied over.
+Note that an augmented output path is specified with `--augmented_path`. The augmented output includes the exact same folder structure as the input dataset (e.g., UBFC-rPPG dataset's DATASET2 folder structure), and contains all  of the corresponding ground truth files that are copied over. More information about supported datasets, as well as a Google Drive link to videos that we used as driving videos for our experiments in the paper, can be found in the [datasets section](#datasets) below.
 
 A naive implementation of multiprocessing can be enabled with the `--mp` command line option to speed-up the motion augmentation pipeline. Depending on your computing environment, this is not recommended. Multiprocessing support will be refined in a future update to this code repository.
 
-Additionally, we provide motion analysis scripts in the `motion_analysis` folder to generate and analyze videos processed using OpenFace. Please refer to the [OpenFace GitHub repo](https://github.com/TadasBaltrusaitis/OpenFace) for instructions on how to properly install OpenFace. We also provide pre-trained models in `pretrained_models` and example configs and dataloaders in `MA_training` for use with the [rPPG-Toolbox](https://github.com/ubicomplab/rPPG-Toolbox).
+Additionally, we provide motion analysis scripts in the `motion_analysis/` folder to generate and analyze videos processed using OpenFace. Please refer to the [OpenFace GitHub repo](https://github.com/TadasBaltrusaitis/OpenFace) for instructions on how to properly install OpenFace. We also provide pre-trained models in `pretrained_models/` and example configs and dataloaders in `MA_training/` for use with the [rPPG-Toolbox](https://github.com/ubicomplab/rPPG-Toolbox).
 
 # Pretrained Models
 
-The below pre-trained models were obtained from [here]([here](https://github.com/zhanglonghao1992/One-Shot_Free-View_Neural_Talking_Head_Synthesis)).
+The below pre-trained models were obtained from [here](https://github.com/zhanglonghao1992/One-Shot_Free-View_Neural_Talking_Head_Synthesis).
 
   Model  |  Train Set   | Baidu Netdisk | Media Fire | 
  ------- |------------  |-----------    |--------      |
  Vox-256-Beta| VoxCeleb-v1  | [Baidu](https://pan.baidu.com/s/1lLS4ArbK2yWelsL-EtwU8g) (PW: c0tc)|  [MF](https://www.mediafire.com/folder/rw51an7tk7bh2/TalkingHead)  |
  Vox-256-New | VoxCeleb-v1  |  -  |  [MF](https://www.mediafire.com/folder/fcvtkn21j57bb/TalkingHead_Update)  |
  Vox-512 | VoxCeleb-v2  |  soon  |  soon  |
+
+ A Google Drive back-up of these pre-trained models (in the form of a `checkpoints/` folder that can be directly used in this repo) can be found [here](https://drive.google.com/drive/folders/1knacMCP3hhS49wsZ7xNVlsU1sZCpr1-0?usp=sharing).
+
+ # Datasets
+
+ The following source rPPG video datasets can be downloaded via the below links (note that aside from SCAMPS, these datasets require some sort of interaction with the authors and/or a filled out form):
+ * [UBFC-rPPG](https://sites.google.com/view/ybenezeth/ubfcrppg)
+ * [PURE](https://www.tu-ilmenau.de/en/university/departments/department-of-computer-science-and-automation/profile/institutes-and-groups/institute-of-computer-and-systems-engineering/group-for-neuroinformatics-and-cognitive-robotics/data-sets-code/pulse-rate-detection-dataset-pure)
+ * [SCAMPS](https://github.com/danmcduff/scampsdataset)
+
+ The [TalkingHead-1KH](https://github.com/deepimagination/TalkingHead-1KH) driving videos we used, filtered using either the mean standard deviation in head pose rotations or the mean standard deviation in facial AUs as described in our paper, can be found [here](https://drive.google.com/drive/folders/1aH7RqpxvsfkvY8v7lHxG_U1dG_ZNKgcf?usp=sharing). In addition to [citing our work](#citation) if you use this motion augmentation pipeline, please [cite the TalkingHead-1KH dataset](https://github.com/deepimagination/TalkingHead-1KH#citation) if you use the aforementioned driving videos. Our self-captured, constrained driving video set (CDVS) as described in the paper will be released soon.
 
 # Acknowledgments
 Thanks to [zhanglonghao1992](https://github.com/zhanglonghao1992/One-Shot_Free-View_Neural_Talking_Head_Synthesis), [NV](https://github.com/NVlabs/face-vid2vid), [AliaksandrSiarohin](https://github.com/AliaksandrSiarohin/first-order-model), and [DeepHeadPose](https://github.com/DriverDistraction/DeepHeadPose) for their useful code implementations!
