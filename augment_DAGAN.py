@@ -28,7 +28,7 @@ import cv2
 
 from torch.multiprocessing import Pool, Process, Value, Array, Manager, set_start_method
 
-
+import glob
 from tqdm import tqdm
 
 if sys.version_info[0] < 3:
@@ -164,7 +164,7 @@ def make_video(dataset, gpu, opt, source_video, driving_video,generator,kp_detec
     final_preds = []
     # Set GPU
     torch.cuda.set_device(gpu)
-
+    print('AP:', augmented_path)
     frames_pbar = tqdm(list(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))))
     
     for frames in range(min(np.shape(source_video)[0], np.shape(driving_video)[0])):
@@ -186,7 +186,11 @@ def make_video(dataset, gpu, opt, source_video, driving_video,generator,kp_detec
     np_preds = np.squeeze(np.asarray(final_preds))
     final_preds_save = [resize(frame, (240, 240))[..., :3] for frame in np_preds]
 
-    imageio.mimsave('test_vv_UBFC.mp4', [img_as_ubyte(frame) for frame in final_preds_save], fps=30)
+    source_video_name = os.path.splitext(source_filename)[0]
+    driving_video_name = os.path.splitext(driving_filename)[0]
+    filename = source_video_name + '_' + driving_video_name + '.mp4'
+    print('saved: ', os.path.join(augmented_path, filename))
+    imageio.mimsave(os.path.join(augmented_path, filename), [img_as_ubyte(frame) for frame in final_preds_save], fps=30)
     
 
     frames_pbar.close()
@@ -200,7 +204,7 @@ def make_video(dataset, gpu, opt, source_video, driving_video,generator,kp_detec
         source_video_name = os.path.splitext(source_filename)[0]
         driving_video_name = os.path.splitext(driving_filename)[0]
         filename = source_video_name + '_' + driving_video_name + '.npy'
-        np.save(os.path.join(augmented_path, source_video_name, filename), final_preds)
+        np.save(os.path.join(augmented_path, filename), final_preds)
     elif dataset == 'UBFC-PHYS':
         final_preds = [resize(frame, (1024, 1024))[..., :3] for frame in np_preds]
         source_video_name = os.path.splitext(source_filename)[0]
@@ -256,17 +260,24 @@ def augment_motion(dataset, gpu, source_list, driving_list, augmented_list, i, o
     # TODO: Add error handling throughout this function
     
     source_filename = os.fsdecode(source_list[i])
-
+    print('check: ',dataset,'   ',dataset== 'UBFC-rPPG')
     if dataset == 'SCAMPS':
         source_video = []
         source_video = read_scamps_video(os.path.join(source_directory, source_filename))
         source_video.tolist()
         print("source: ",os.path.join(source_directory, source_filename))
     elif dataset == 'UBFC-rPPG':
+        '''
+        print('source ', os.path.join(source_directory, source_filename))
+        source_video = read_ubfc_video(os.path.join(source_directory, source_filename))
+        source_video.tolist()
+        '''
         source_video = []
         print("source: ",os.path.join(source_directory, source_filename, f'{source_filename}_vid.avi'))
-        source_video = read_ubfc_video(os.path.join(source_directory, source_filename, f'{source_filename}_vid.avi')) 
+        #source_video = read_ubfc_video(os.path.join(source_directory, source_filename, f'{source_filename}_vid.avi')) 
+        source_video = read_ubfc_video(os.path.join(source_directory, source_filename, 'vid.avi')) 
         source_video.tolist()
+        
     elif dataset == 'UBFC-PHYS':
         source_video = []
         print("source: ",os.path.join(source_directory, source_filename, f'vid_{source_filename}_T1.avi'))
@@ -329,7 +340,7 @@ def augment_motion(dataset, gpu, source_list, driving_list, augmented_list, i, o
     elif dataset == 'UBFC-rPPG':
         filename = source_video_name + '_' + driving_video_name + '.npy'
 
-        while os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
+        if os.path.exists(os.path.join(opt.augmented_path, filename)) == True:
             driving_path = np.random.choice(driving_list, 1)[0]
             driving_filename = os.fsdecode(driving_path)
             driving_video_name = os.path.splitext(driving_filename)[0]
@@ -410,13 +421,14 @@ def copy_folder(src_folder, dst_folder):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--config", required=True, help="path to config")
-    parser.add_argument("--checkpoint", default='SPADE_DaGAN_vox_adv_256.pth.tar', help="path to checkpoint to restore")
-   
+    parser.add_argument("--config", default='/playpen-nas-ssd/yulupan/CVPR2022-DaGAN/config/vox-adv-256.yaml', help="path to config")
+    parser.add_argument("--checkpoint", default='/playpen-nas-ssd/yulupan/MArPPG-Video-Toolbox/depth/SPADE_DaGAN_vox_adv_256.pth.tar', help="path to checkpoint to restore")
+    #parser.add_argument("--checkpoint", default='/playpen-nas-ssd/data/shared_checkpoints/DaGAN/DaGAN_vox_adv_256.pth.tar', help="path to checkpoint to restore")
     parser.add_argument("--relative", dest="relative", action="store_true", help="use relative or absolute keypoint coordinates")
     parser.add_argument("--adapt_scale", dest="adapt_scale", action="store_true", help="adapt movement scale based on convex hull of keypoints")
-    parser.add_argument("--generator", type=str, required=True)
-    parser.add_argument("--kp_num", type=int, required=True)
+    parser.add_argument("--generator", default = 'SPADEDepthAwareGenerator', type=str)
+    #parser.add_argument("--generator", default = 'DepthAwareGenerator', type=str)
+    parser.add_argument("--kp_num", default = 15, type=int)
 
 
     parser.add_argument("--find_best_frame", dest="find_best_frame", action="store_true", 
@@ -428,9 +440,9 @@ if __name__ == "__main__":
     parser.add_argument("--cpu", dest="cpu", action="store_true", help="cpu mode.")
     
     parser.add_argument("--scamps_source", default='', help="path for scamps source")
-    parser.add_argument("--augmented_path", default='', help="path for saving augmented SCAMPS videos")
-    parser.add_argument("--source_path", default='', help="path for source SCAMPS videos")
-    parser.add_argument("--driving_path", default='', help="path for driving videos")
+    parser.add_argument("--augmented_path", default='result2', help="path for saving augmented SCAMPS videos")
+    parser.add_argument("--source_path", default='/playpen-nas-hdd/UNC_Google_Physio/UBFC-rPPG/DATASET_2_backup/DATASET_2/test', help="path for source SCAMPS videos")
+    parser.add_argument("--driving_path", default='driving', help="path for driving videos")
     parser.add_argument("--dataset", default='UBFC-rPPG', choices=["SCAMPS", "UBFC-rPPG", "UBFC-PHYS", "PURE"], help="dataset specification")
  
 
@@ -452,10 +464,13 @@ if __name__ == "__main__":
     generator, kp_detector = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, cpu=opt.cpu)
     print("Checkpoints loaded!")
 
-    depth_encoder = depth.ResnetEncoder(50, False)
+    depth_encoder = depth.ResnetEncoder(50, False) #50 for Spade
     depth_decoder = depth.DepthDecoder(num_ch_enc=depth_encoder.num_ch_enc, scales=range(4))
-    loaded_dict_enc = torch.load('./depth/models/weights_19/encoder.pth')
-    loaded_dict_dec = torch.load('./depth/models/weights_19/depth.pth')
+    #loaded_dict_enc = torch.load('./depth/models/weights_19/encoder.pth')
+    #loaded_dict_dec = torch.load('./depth/models/weights_19/depth.pth')
+    loaded_dict_enc = torch.load('./depth/10w/encoder.pth')
+    loaded_dict_dec = torch.load('./depth/10w/depth.pth')
+
     filtered_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in depth_encoder.state_dict()}
     depth_encoder.load_state_dict(filtered_dict_enc)
     depth_decoder.load_state_dict(loaded_dict_dec)
