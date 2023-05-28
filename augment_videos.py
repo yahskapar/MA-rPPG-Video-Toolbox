@@ -340,8 +340,8 @@ def augment_motion(dataset, gpu, source_list, driving_list, augmented_list, i, o
         print("source: ",os.path.join(source_directory, source_filename))
     elif dataset == 'UBFC-rPPG':
         source_video = []
-        print("source: ",os.path.join(source_directory, source_filename, f'{source_filename}_vid.avi'))
-        source_video = read_ubfc_video(os.path.join(source_directory, source_filename, f'{source_filename}_vid.avi')) 
+        print("source: ",os.path.join(source_directory, source_filename, 'vid.avi'))
+        source_video = read_ubfc_video(os.path.join(source_directory, source_filename, 'vid.avi')) 
         source_video.tolist()
     elif dataset == 'UBFC-PHYS':
         source_video = []
