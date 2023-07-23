@@ -47,7 +47,7 @@ Note that an augmented output path is specified with `--augmented_path`. The aug
 
 A naive implementation of multiprocessing can be enabled with the `--mp` command line option to speed-up the motion augmentation pipeline. Depending on your computing environment, this is not recommended. Multiprocessing support will be refined in a future update to this code repository.
 
-Additionally, we provide motion analysis scripts in the `motion_analysis/` folder to generate and analyze videos processed using OpenFace. Please refer to the [OpenFace GitHub repo](https://github.com/TadasBaltrusaitis/OpenFace) for instructions on how to properly install OpenFace. We also provide pre-trained models in `pretrained_models/` and example configs and dataloaders in `MA_training/` for use with the [rPPG-Toolbox](https://github.com/ubicomplab/rPPG-Toolbox).
+You may find code for motion analysis and visualization using [OpenFace](https://github.com/TadasBaltrusaitis/OpenFace) to be useful [here](https://github.com/ubicomplab/rPPG-Toolbox/tree/main/tools/motion_analysis), in the [rPPG-Toolbox](https://github.com/ubicomplab/rPPG-Toolbox) repo. We also provide pre-trained models in `pretrained_models/` for use with the [rPPG-Toolbox](https://github.com/ubicomplab/rPPG-Toolbox). You can train with your own, motion-augmented data by following the instructions in the [rPPG-Toolbox](https://github.com/ubicomplab/rPPG-Toolbox) repo [here](https://github.com/ubicomplab/rPPG-Toolbox#blue_book-motion-augmented-training).
 
 ## :sparkles: Pretrained Models
 
