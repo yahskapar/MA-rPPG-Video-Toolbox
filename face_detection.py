@@ -5,7 +5,7 @@ import numpy as np
 def resize_to_original(frame, width, height):
     return cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
 
-def face_detection(frame, use_larger_box=False, larger_box_coef=1.0):
+def face_detection(frame, detector, use_larger_box=False, larger_box_coef=1.0):
     """Face detection on a single frame.
 
     Args:

@@ -139,7 +139,5 @@ def make_animation(source_image, driving_video, frame_num, generator, kp_detecto
         predictions.append(np.transpose(out['prediction'].data.cpu().numpy(), [0, 2, 3, 1])[0])
 
     # Clean-up
-    del source
-    del driving
-    del driving_frame
+    del source, driving, driving_frame
     return predictions

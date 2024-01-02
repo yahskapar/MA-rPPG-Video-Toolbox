@@ -7,7 +7,7 @@ from tqdm import tqdm
 from argparse import ArgumentParser
 
 import torch
-from torch.multiprocessing import Pool, Manager, set_start_method, cpu_count
+from torch.multiprocessing import Queue, Pool, Manager, set_start_method, cpu_count
 from threading import Thread
 
 from animate import make_animation
@@ -21,18 +21,18 @@ warnings.filterwarnings("ignore")
 def make_video(dataset, opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,source_directory, source_filename, driving_filename, augmented_path):
     final_preds = []
 
-    # # The progress bar will effectively be broken when multi-processing is used
-    # # A fix will be implemented in a future update to this toolbox
-    frames_pbar = tqdm(list(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))))
-    
-    # for frames in tqdm(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))):
+    # TODO: The progress bar will effectively be broken when multi-processing is used
+    # A fix will be implemented in a future update to this toolbox. Uncomment the below 
+    # line and its usage elseswhere in this function if you want per-frame progress updates.
+    # frames_pbar = tqdm(list(range(min(np.shape(source_video)[0], np.shape(driving_video)[0]))))
+
     for frames in range(min(np.shape(source_video)[0], np.shape(driving_video)[0])):
         source_image = resize(source_video[frames], (256, 256))[..., :3]
         # TODO: Perform batch processing
         predictions = make_animation(source_image, driving_video, frames, generator, kp_detector, he_estimator, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, estimate_jacobian=estimate_jacobian, cpu=opt.cpu, free_view=opt.free_view, yaw=opt.yaw, pitch=opt.pitch, roll=opt.roll)
         final_preds.append(predictions)
-        frames_pbar.update(1)
-    frames_pbar.close()
+    #     frames_pbar.update(1)
+    # frames_pbar.close()
     np_preds = np.squeeze(np.asarray(final_preds))
 
     if dataset == 'SCAMPS':
@@ -56,14 +56,14 @@ def make_video(dataset, opt, source_video, driving_video,generator,kp_detector,h
         driving_video_name = os.path.splitext(driving_filename)[0]
         filename = source_video_name + '_' + driving_video_name + '.npy'
         np.save(os.path.join(augmented_path, source_video_name, source_video_name, filename), final_preds)
-    
-    # Clean-up
-    gc.collect()
-    torch.cuda.empty_cache()
+
+    # Cleanup
+    del final_preds, np_preds
+
     return
 
 def augment_motion(dataset, source_list, driving_list, i, opt, source_directory, driving_directory, generator, kp_detector, he_estimator, estimate_jacobian):
-    # TODO: Improve error handling throughout this function    
+    # TODO: Improve error handling throughout this function
     source_filename = os.fsdecode(source_list[i])
 
     if dataset == 'SCAMPS':
@@ -174,8 +174,8 @@ def augment_motion(dataset, source_list, driving_list, i, opt, source_directory,
     driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
     print("Driving shape: ", np.shape(driving_video))
 
-    if(np.shape(driving_video)[0] < np.shape(source_video)[0]):
     # Make total frames used the same
+    if(np.shape(driving_video)[0] < np.shape(source_video)[0]):
         source_length = len(source_video)
         driving_length = len(driving_video)
         if source_length > driving_length:
@@ -195,15 +195,21 @@ def augment_motion(dataset, source_list, driving_list, i, opt, source_directory,
     return
 
 def worker(args):
-    dataset, source_list, driving_list, i, opt, source_directory, driving_directory, generator, kp_detector, he_estimator, estimate_jacobian, process_id, num_gpus, progress_queue = args
+    dataset, source_list, driving_list, i, opt, source_directory, driving_directory, generator, kp_detector, he_estimator, estimate_jacobian, gpu_queue, progress_queue = args
 
-    # Round-robin GPU allocation
-    gpu_num = process_id % num_gpus
+    gpu_num = gpu_queue.get()  # Get a GPU ID from the queue
     torch.cuda.set_device(gpu_num)
 
     # Now perform the task with the given GPU
     augment_motion(dataset, source_list, driving_list, i, opt, source_directory, driving_directory, generator, kp_detector, he_estimator, estimate_jacobian)
+
+    # Clean-up
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    gpu_queue.put(gpu_num)  # Put the GPU ID back into the queue
     progress_queue.put(1)
+
 
 def process_progress_updates(progress_queue, total_tasks, pbar):
     completed_tasks = 0
@@ -247,7 +253,7 @@ if __name__ == "__main__":
     opt = parser.parse_args()
 
     try:
-        set_start_method('spawn')
+        set_start_method('spawn', force=True)
     except RuntimeError:
         print("Error! Unable to set start method to spawn.")
 
@@ -259,14 +265,15 @@ if __name__ == "__main__":
     generator, kp_detector, he_estimator = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, gen=opt.gen, cpu=opt.cpu)
     print("Checkpoints loaded!")
 
+    # Load config
     with open(opt.config) as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
     estimate_jacobian = config['model_params']['common_params']['estimate_jacobian']
 
-    #Listing driving video list
+    # Get driving video list
     driving_list = os.listdir(driving_directory)
 
-    #Listing source video list
+    # Get source video list
     source_list = sorted(os.listdir(source_directory))
     
     copy_folder(source_directory, augmented_directory)
@@ -282,17 +289,22 @@ if __name__ == "__main__":
     if opt.mp is False:
         print("Multiprocessing is NOT being used. Please consider enabling it with --mp.")
         for i in choose_range:
-            augment_motion(opt.dataset, source_list, driving_list, i, opt, source_directory, driving_directory, generator, kp_detector,he_estimator, estimate_jacobian)
+            augment_motion(opt.dataset, source_list, driving_list, i, opt, source_directory, driving_directory, generator, kp_detector, he_estimator, estimate_jacobian)
             pbar.update(1)
         pbar.close()
     elif opt.mp is True:
         print("Multiprocessing is being used!")
 
         with Manager() as manager:
+            gpu_queue = manager.Queue()
             progress_queue = manager.Queue()
 
+            # Initialize GPU queue with available GPU IDs
+            for gpu_id in range(torch.cuda.device_count()):
+                gpu_queue.put(gpu_id)
+
             # Prepare arguments for each task
-            tasks = [(opt.dataset, source_list, driving_list, i, opt, source_directory, driving_directory, generator, kp_detector, he_estimator, estimate_jacobian, process_id, gpu_count, progress_queue) for process_id, i in enumerate(choose_range)]
+            tasks = [(opt.dataset, source_list, driving_list, i, opt, source_directory, driving_directory, generator, kp_detector, he_estimator, estimate_jacobian, gpu_queue, progress_queue) for i, _ in enumerate(choose_range)]
 
             num_processes = min(cpu_count(), torch.cuda.device_count())
 
@@ -300,8 +312,15 @@ if __name__ == "__main__":
             progress_thread = Thread(target=process_progress_updates, args=(progress_queue, len(tasks), pbar))
             progress_thread.start()
 
-            # Start the pool of worker processes
-            with Pool(processes=num_processes) as pool:
-                pool.map(worker, tasks)
+            # Create a Pool and distribute the tasks
+            pool = Pool(processes=min(cpu_count(), torch.cuda.device_count()))
+
+            # Using imap_unordered for potentially more efficient task distribution
+            for _ in pool.imap_unordered(worker, tasks):
+                pass
+
+            # Close the pool and wait for all worker processes to finish
+            pool.close()
+            pool.join()
 
             progress_thread.join()
