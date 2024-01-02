@@ -79,7 +79,7 @@ If you find our [paper](https://arxiv.org/abs/2303.12059) or this toolbox useful
 
 ```
 @misc{paruchuri2023motion,
-      title={Motion Matters: Neural Motion Transfer for Better Camera Physiological Sensing}, 
+      title={Motion Matters: Neural Motion Transfer for Better Camera Physiological Measurement}, 
       author={Akshay Paruchuri and Xin Liu and Yulu Pan and Shwetak Patel and Daniel McDuff and Soumyadip Sengupta},
       year={2023},
       eprint={2303.12059},
