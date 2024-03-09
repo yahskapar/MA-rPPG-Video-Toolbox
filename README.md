@@ -6,6 +6,9 @@
 <p align="center">
 :fire: If you have any questions or concerns, please create an issue :memo:! :fire:
 </p>
+<p align="center">
+I'm also very happy to try and help folks attempting to use this work in their research. Please reach out!
+</p>
 
 <p align="center">
 <a href="https://arxiv.org/abs/2303.12059">Pre-print</a> | <a href="https://motion-matters.github.io/">Project Website</a>
