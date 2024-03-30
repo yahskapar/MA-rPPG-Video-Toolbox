@@ -81,10 +81,11 @@ Thanks to [zhanglonghao1992](https://github.com/zhanglonghao1992/One-Shot_Free-V
 If you find our [paper](https://arxiv.org/abs/2303.12059) or this toolbox useful for your research, please cite our work.
 
 ```
-@article{paruchuri2023motion,
+@inproceedings{paruchuri2024motion,
   title={Motion Matters: Neural Motion Transfer for Better Camera Physiological Measurement},
   author={Paruchuri, Akshay and Liu, Xin and Pan, Yulu and Patel, Shwetak and McDuff, Daniel and Sengupta, Soumyadip},
-  journal={arXiv preprint arXiv:2303.12059},
-  year={2023}
+  booktitle={Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision},
+  pages={5933--5942},
+  year={2024}
 }
 ```
