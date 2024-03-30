@@ -81,12 +81,10 @@ Thanks to [zhanglonghao1992](https://github.com/zhanglonghao1992/One-Shot_Free-V
 If you find our [paper](https://arxiv.org/abs/2303.12059) or this toolbox useful for your research, please cite our work.
 
 ```
-@misc{paruchuri2023motion,
-      title={Motion Matters: Neural Motion Transfer for Better Camera Physiological Measurement}, 
-      author={Akshay Paruchuri and Xin Liu and Yulu Pan and Shwetak Patel and Daniel McDuff and Soumyadip Sengupta},
-      year={2023},
-      eprint={2303.12059},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV}
+@article{paruchuri2023motion,
+  title={Motion Matters: Neural Motion Transfer for Better Camera Physiological Measurement},
+  author={Paruchuri, Akshay and Liu, Xin and Pan, Yulu and Patel, Shwetak and McDuff, Daniel and Sengupta, Soumyadip},
+  journal={arXiv preprint arXiv:2303.12059},
+  year={2023}
 }
 ```
