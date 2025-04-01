@@ -18,7 +18,7 @@ import imageio
 import warnings
 warnings.filterwarnings("ignore")
 
-backend = 'RF'
+backend = 'HC'
 detector = FaceDetector(backend)
 
 
@@ -56,7 +56,7 @@ def make_video(dataset, opt, source_video, driving_video, generator, kp_detector
         source_video_name = os.path.splitext(source_filename)[0]
         driving_video_name = os.path.splitext(driving_filename)[0]
         filename = source_video_name + '_' + driving_video_name + '.npy'
-		if not os.path.exists(os.path.join(augmented_path, source_video_name)):
+        if not os.path.exists(os.path.join(augmented_path, source_video_name)):
             os.makedirs(os.path.join(augmented_path, source_video_name))
         np.save(os.path.join(augmented_path, source_video_name, filename), final_preds)
     elif dataset == 'PURE':
@@ -64,7 +64,7 @@ def make_video(dataset, opt, source_video, driving_video, generator, kp_detector
         source_video_name = os.path.splitext(source_filename)[0]
         driving_video_name = os.path.splitext(driving_filename)[0]
         filename = source_video_name + '_' + driving_video_name + '.npy'
-		if not os.path.exists(os.path.join(augmented_path, source_video_name)):
+        if not os.path.exists(os.path.join(augmented_path, source_video_name)):
             os.makedirs(os.path.join(augmented_path, source_video_name))
         np.save(os.path.join(augmented_path, source_video_name, source_video_name, filename), final_preds)
 
