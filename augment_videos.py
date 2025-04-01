@@ -12,13 +12,18 @@ from threading import Thread
 
 from animate import make_animation
 from utils import copy_folder, load_checkpoints, read_ubfc_video, read_pure_video, read_scamps_video, save_scamps_video
-from face_detection import resize_to_original, face_detection
+from face_detection import resize_to_original, face_detection, FaceDetector
 from skimage.transform import resize
 import imageio
 import warnings
 warnings.filterwarnings("ignore")
 
-def make_video(dataset, opt, source_video, driving_video,generator,kp_detector,he_estimator,estimate_jacobian,source_directory, source_filename, driving_filename, augmented_path):
+backend = 'HC'
+detector = FaceDetector(backend)
+
+
+def make_video(dataset, opt, source_video, driving_video, generator, kp_detector, he_estimator, estimate_jacobian,
+               source_directory, source_filename, driving_filename, augmented_path):
     final_preds = []
 
     # TODO: The progress bar will effectively be broken when multi-processing is used
@@ -43,18 +48,24 @@ def make_video(dataset, opt, source_video, driving_video,generator,kp_detector,h
         source_video_name = os.path.splitext(source_filename)[0]
         driving_video_name = os.path.splitext(driving_filename)[0]
         filename = source_video_name + '_' + driving_video_name + '.npy'
+        if not os.path.exists(os.path.join(augmented_path, source_video_name)):
+            os.makedirs(os.path.join(augmented_path, source_video_name))
         np.save(os.path.join(augmented_path, source_video_name, filename), final_preds)
     elif dataset == 'UBFC-PHYS':
         final_preds = [resize(frame, (1024, 1024))[..., :3] for frame in np_preds]
         source_video_name = os.path.splitext(source_filename)[0]
         driving_video_name = os.path.splitext(driving_filename)[0]
         filename = source_video_name + '_' + driving_video_name + '.npy'
+        if not os.path.exists(os.path.join(augmented_path, source_video_name)):
+            os.makedirs(os.path.join(augmented_path, source_video_name))
         np.save(os.path.join(augmented_path, source_video_name, filename), final_preds)
     elif dataset == 'PURE':
         final_preds = [resize(frame, (480, 640))[..., :3] for frame in np_preds]
         source_video_name = os.path.splitext(source_filename)[0]
         driving_video_name = os.path.splitext(driving_filename)[0]
         filename = source_video_name + '_' + driving_video_name + '.npy'
+        if not os.path.exists(os.path.join(augmented_path, source_video_name)):
+            os.makedirs(os.path.join(augmented_path, source_video_name))
         np.save(os.path.join(augmented_path, source_video_name, source_video_name, filename), final_preds)
 
     # Cleanup
@@ -69,13 +80,13 @@ def augment_motion(dataset, source_list, driving_list, i, opt, source_directory,
     if dataset == 'SCAMPS':
         source_video = []
         source_video = read_scamps_video(os.path.join(source_directory, source_filename))
-        source_video.tolist()
+        # source_video.tolist()
         print("source: ",os.path.join(source_directory, source_filename))
     elif dataset == 'UBFC-rPPG':
         source_video = []
         print("source: ",os.path.join(source_directory, source_filename, 'vid.avi'))
         source_video = read_ubfc_video(os.path.join(source_directory, source_filename, 'vid.avi')) 
-        source_video.tolist()
+        # source_video.tolist()
     elif dataset == 'UBFC-PHYS':
         source_video = []
         print("source: ",os.path.join(source_directory, source_filename, f'vid_{source_filename}_T1.avi'))
@@ -85,7 +96,7 @@ def augment_motion(dataset, source_list, driving_list, i, opt, source_directory,
         source_video = []
         print("source: ",os.path.join(source_directory, source_filename, source_filename, ""))
         source_video = read_pure_video(os.path.join(source_directory, source_filename, source_filename, "")) 
-        source_video.tolist()
+        # source_video.tolist()
 
     print(f'Source Shape: {np.shape(source_video)}')
 
@@ -98,13 +109,14 @@ def augment_motion(dataset, source_list, driving_list, i, opt, source_directory,
         # TODO: Add config options for this
         for frame in source_video:
             if dataset == 'PURE':
-                face_box = face_detection(frame, True, 1.7) # PURE
+                face_box = face_detection(frame, detector, True, larger_box_coef=1.7)  # PURE
             else:
-                face_box = face_detection(frame, True, 2.0) # MAUBFC and others
+                face_box = face_detection(frame, detector, True, larger_box_coef=2.0)  # MAUBFC and others
             face_region_all.append(face_box)
         face_region_all = np.asarray(face_region_all, dtype='int')
         face_region_median = np.median(face_region_all, axis=0).astype('int')
 
+        print(f'face_region_median: {face_region_median}')
         # Apply the median bounding box for cropping and subsequent resizing
         for frame in source_video:
             cropped_frame = frame[int(face_region_median[1]):int(face_region_median[1]+face_region_median[3]),

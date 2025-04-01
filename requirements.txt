@@ -13,3 +13,4 @@ scipy==1.5.4
 tqdm==4.64.1
 vidgear==0.2.4
 imageio-ffmpeg==0.4.8
+retina-face==0.0.13
