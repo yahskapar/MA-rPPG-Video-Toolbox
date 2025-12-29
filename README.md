@@ -63,7 +63,7 @@ The below pre-trained models were obtained from [here](https://github.com/zhangl
  Vox-256-New | VoxCeleb-v1  |  -  |  [MF](https://www.mediafire.com/folder/fcvtkn21j57bb/TalkingHead_Update)  |
  Vox-512 | VoxCeleb-v2  |  soon  |  soon  |
 
- A Google Drive back-up of these pre-trained models (in the form of a `checkpoints/` folder that can be directly used in this repo) can be found [here](https://drive.google.com/drive/folders/1knacMCP3hhS49wsZ7xNVlsU1sZCpr1-0?usp=sharing).
+ A Google Drive back-up of these pre-trained models (in the form of a `checkpoints/` folder that can be directly used in this repo) can be found [here](https://drive.google.com/drive/folders/1SDCICEvxojp4Ew3ZivGQWXyj1aDWU_6f?usp=sharing).
 
  ## :file_folder: Datasets
 
@@ -72,7 +72,7 @@ The below pre-trained models were obtained from [here](https://github.com/zhangl
  * [PURE](https://www.tu-ilmenau.de/en/university/departments/department-of-computer-science-and-automation/profile/institutes-and-groups/institute-of-computer-and-systems-engineering/group-for-neuroinformatics-and-cognitive-robotics/data-sets-code/pulse-rate-detection-dataset-pure)
  * [SCAMPS](https://github.com/danmcduff/scampsdataset)
 
- The [TalkingHead-1KH](https://github.com/deepimagination/TalkingHead-1KH) driving videos we used, filtered using either the mean standard deviation in head pose rotations or the mean standard deviation in facial AUs as described in our paper, can be found [here](https://drive.google.com/drive/folders/1aH7RqpxvsfkvY8v7lHxG_U1dG_ZNKgcf?usp=sharing). In addition to [citing our work](#scroll-citation) if you use this motion augmentation pipeline, please [cite the TalkingHead-1KH dataset](https://github.com/deepimagination/TalkingHead-1KH#citation) if you use the aforementioned driving videos. Our self-captured, constrained driving video set (CDVS) as described in the paper will be released soon.
+ The [TalkingHead-1KH](https://github.com/deepimagination/TalkingHead-1KH) driving videos we used, filtered using either the mean standard deviation in head pose rotations or the mean standard deviation in facial AUs as described in our paper, can be found [here](https://drive.google.com/drive/folders/1KE3qmVCNIPEzQRiZF93S_F9iz2UI-7ue?usp=sharing). In addition to [citing our work](#scroll-citation) if you use this motion augmentation pipeline, please [cite the TalkingHead-1KH dataset](https://github.com/deepimagination/TalkingHead-1KH#citation) if you use the aforementioned driving videos. Our self-captured, constrained driving video set (CDVS) as described in the paper will be released soon.
 
 ## :scroll: Acknowledgments
 Thanks to [zhanglonghao1992](https://github.com/zhanglonghao1992/One-Shot_Free-View_Neural_Talking_Head_Synthesis), [NV](https://github.com/NVlabs/face-vid2vid), [AliaksandrSiarohin](https://github.com/AliaksandrSiarohin/first-order-model), and [DeepHeadPose](https://github.com/DriverDistraction/DeepHeadPose) for their useful code implementations!
